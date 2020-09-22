@@ -5,4 +5,8 @@
         <OutputType>Exe</OutputType>
     </PropertyGroup>
 
+    <ItemGroup>
+      <ProjectReference Include="..\Hazel-dotNETCore\Hazel-dotNETCore\Hazel-dotNETCore.csproj" />
+    </ItemGroup>
+
 </Project>

@@ -1,0 +1,3 @@
+[submodule "Hazel-dotNETCore"]
+	path = Hazel-dotNETCore
+	url = https://github.com/molenzwiebel/Hazel-dotNETCore

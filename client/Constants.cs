@@ -1,4 +1,6 @@
-﻿namespace client
+﻿using System.Linq;
+
+namespace client
 {
     /**
      * Represents the tags of messages sent by/to us from the matchmaking servers.
@@ -36,7 +38,7 @@
         Ready = 7,
         ChangeSettings = 8,
     }
-    
+
     /**
      * Represents the set of possible RCP actions that can be invoked by a client.
      */
@@ -73,5 +75,79 @@
         RepairSystem = 28,
         SetTasks = 29,
         UpdateGameData = 30
+    }
+
+    /**
+     * Represents a reason for being disconnected, as reported by the server.
+     */
+    public enum DisconnectReasons
+    {
+        ExitGame = 0,
+        GameFull = 1,
+        GameStarted = 2,
+        GameNotFound = 3,
+        IncorrectVersion = 5,
+        Banned = 6,
+        Kicked = 7,
+        Custom = 8,
+        InvalidName = 9,
+        Hacking = 10,
+        Destroy = 16,
+        Error = 17,
+        IncorrectGame = 18,
+        ServerRequest = 19,
+        ServerFull = 20,
+        FocusLostBackground = 207,
+        IntentionalLeaving = 208,
+        FocusLost = 209,
+        NewConnection = 210
+    }
+
+    /**
+     * Utility class for converting from/to lobby game names and their integer identifier counterparts.
+     */
+    public static class GameCode
+    {
+        private static string V2 = "QWXRTYLPESDFGHUJKZOCVBINMA";
+        private static int[] V2Map = Enumerable.Range(65, 26).Select(x => V2.IndexOf((char) x)).ToArray();
+
+        /**
+         * Converts the specified game ID integer into the string representation.
+         */
+        public static string IntToGameNameV2(int gameId)
+        {
+            var ret = new char[6];
+
+            var v4 = gameId & 0x3FF;
+            var v5 = (gameId >> 10) & 0xFFFF;
+
+            ret[0] = V2[v4 % 26];
+            ret[1] = V2[v4 / 26];
+            ret[2] = V2[v5 % 26];
+            ret[3] = V2[v5 / 26 % 26];
+            ret[4] = V2[v5 / 676 % 26];
+            ret[5] = V2[v5 / 17576 % 26];
+
+            return new string(ret);
+        }
+
+        /**
+         * Converts the specified game name into its integer representation.
+         */
+        public static int GameNameToIntV2(string gameName)
+        {
+            gameName = gameName.ToUpperInvariant();
+
+            var a = V2Map[gameName[0] - 'A'];
+            var b = V2Map[gameName[1] - 'A'];
+            var c = V2Map[gameName[2] - 'A'];
+            var d = V2Map[gameName[3] - 'A'];
+            var e = V2Map[gameName[4] - 'A'];
+            var f = V2Map[gameName[5] - 'A'];
+
+            // Spaghetti
+            return (int) (((ushort) a + 26 * (ushort) b) & 0x3FF |
+                          ((c + 26 * ((uint) d + 26 * (e + 26 * f))) << 10) & 0x3FFFFC00 | 0x80000000);
+        }
     }
 }

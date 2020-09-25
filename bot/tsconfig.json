@@ -1,0 +1,17 @@
+{
+    "compilerOptions": {
+        "noImplicitAny": true,
+        "strictNullChecks": true,
+        "alwaysStrict": true,
+        "esModuleInterop": true,
+        "outDir": "dist",
+        "module": "commonjs",
+        "experimentalDecorators": true,
+        "target": "es2015",
+        "lib": ["esnext", "dom"]
+    },
+    "include": [
+        "src/**/*"
+    ],
+    "exclude": ["node_modules"]
+}

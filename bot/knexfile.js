@@ -3,7 +3,7 @@ require("dotenv/config");
 const db = {
     // MikroORM
     type: "postgresql",
-    dbName: "impostor",
+    dbName: "postgres",
     clientUrl: process.env.DATABASE_URL,
 
     // Knex

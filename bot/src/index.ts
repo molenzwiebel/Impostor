@@ -1,6 +1,7 @@
 import "dotenv/config";
 import Eris from "eris";
 import { connectToDatabase } from "./database";
+import { onMessageCreated } from "./listeners";
 
 const intents = Eris.Constants.Intents;
 
@@ -18,6 +19,8 @@ const intents = Eris.Constants.Intents;
 
     await bot.connect();
     await new Promise(r => bot.once("ready", r));
+
+    bot.on("messageCreate", onMessageCreated.bind(null, bot));
 
     console.log("[+] Connected to Discord as " + bot.user.username);
 })();

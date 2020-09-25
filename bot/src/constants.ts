@@ -1,7 +1,7 @@
 export const enum LobbyRegion {
-    ASIA = "asia",
-    NORTH_AMERICA = "north_america",
-    EUROPE = "europe",
+    ASIA = "Asia",
+    NORTH_AMERICA = "North America",
+    EUROPE = "Europe",
 }
 
 export const enum SessionState {
@@ -9,3 +9,9 @@ export const enum SessionState {
     PLAYING = "playing",
     DISCUSSING = "discussing",
 }
+
+export const SERVER_IPS = {
+    [LobbyRegion.EUROPE]: "172.105.251.170",
+    [LobbyRegion.NORTH_AMERICA]: "198.58.99.71",
+    [LobbyRegion.ASIA]: "",
+};

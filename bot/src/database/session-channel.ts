@@ -23,13 +23,26 @@ export default class SessionChannel {
     channelId!: string;
 
     /**
+     * The invite code for the channel. Not always relevant (only the main channel).
+     */
+    @Property()
+    invite!: string | null;
+
+    /**
      * The particular type of this channel.
      */
     @Enum()
     type!: SessionChannelType;
+
+    constructor(channelId: string, type: SessionChannelType, invite?: string) {
+        this.channelId = channelId;
+        this.invite = invite || null;
+        this.type = type;
+    }
 }
 
 export const enum SessionChannelType {
     TALKING = "talking",
     SILENCE = "silence",
+    CATEGORY = "category",
 }

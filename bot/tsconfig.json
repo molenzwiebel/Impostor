@@ -7,7 +7,8 @@
         "outDir": "dist",
         "module": "commonjs",
         "experimentalDecorators": true,
-        "target": "es2015",
+        "emitDecoratorMetadata": true,
+        "target": "esnext",
         "lib": ["esnext", "dom"]
     },
     "include": [

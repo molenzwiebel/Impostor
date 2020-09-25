@@ -8,10 +8,10 @@ const db = {
 
     // Knex
     client: "postgres",
-    connection: process.env.DATABASE_URL
+    connection: process.env.DATABASE_URL,
 };
 
 module.exports = {
     development: db,
-    production: db
+    production: db,
 };

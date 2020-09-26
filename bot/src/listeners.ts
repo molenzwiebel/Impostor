@@ -6,10 +6,14 @@ import SessionChannel, { SessionChannelType } from "./database/session-channel";
 import startSession from "./session-runner";
 
 const COMMAND_PREFIX = "!amongus ";
-const V2 = "QWXRTYLPESDFGHUJKZOCVBINMA";
-
 const VOICE_CHANNEL_USERS = new Map<string, string[]>();
 
+/**
+ * Invoked when the specified member joins the specified new voice channel.
+ * Responsible for tracking voice channel membership, as well as ensuring
+ * that anyone joining the current talking voice channel while the game is
+ * in progress will automatically be redirected to the silence channel.
+ */
 export async function onVoiceJoin(member: eris.Member, newChannel: eris.VoiceChannel) {
     VOICE_CHANNEL_USERS.set(newChannel.id, [...(VOICE_CHANNEL_USERS.get(newChannel.id) || []), member.id]);
 
@@ -38,6 +42,9 @@ export async function onVoiceJoin(member: eris.Member, newChannel: eris.VoiceCha
     }
 }
 
+/**
+ * Invoked when the specified member leaves the specified channel.
+ */
 export async function onVoiceLeave(member: eris.Member, oldChannel: eris.VoiceChannel) {
     const users = VOICE_CHANNEL_USERS.get(oldChannel.id);
     if (!users) return;
@@ -48,15 +55,27 @@ export async function onVoiceLeave(member: eris.Member, oldChannel: eris.VoiceCh
     users.splice(idx, 1);
 }
 
+/**
+ * Invoked when the specified member moves from the oldChannel to the
+ * newChannel. Simply invokes onVoiceLeave and onVoiceJoin.
+ */
 export async function onVoiceChange(member: eris.Member, newChannel: eris.VoiceChannel, oldChannel: eris.VoiceChannel) {
     await onVoiceLeave(member, oldChannel);
     await onVoiceJoin(member, newChannel);
 }
 
+/**
+ * Helper function that returns the list of user ids currently in the
+ * specified voice channel, or an empty list if there are none.
+ */
 export function getMembersInChannel(channel: string): string[] {
     return VOICE_CHANNEL_USERS.get(channel) || [];
 }
 
+/**
+ * Invoked when a new message is created in a channel shared by the bot.
+ * Will attempt to parse the message as a command, and handle appropriately.
+ */
 export async function onMessageCreated(bot: eris.Client, msg: eris.Message) {
     if (!msg.content.startsWith(COMMAND_PREFIX) || msg.author.bot) return;
     if (!(msg.channel instanceof eris.TextChannel)) return;
@@ -81,7 +100,7 @@ function parseCommandInvocation(msg: string): { region: LobbyRegion; code: strin
 
     let region: LobbyRegion | null = null;
 
-    const nextWord = msg.slice(0, msg.indexOf(" "));
+    const nextWord = msg.slice(0, msg.indexOf(" ")).toLowerCase();
 
     if (nextWord === "asia" || nextWord === "as") {
         region = LobbyRegion.ASIA;
@@ -105,7 +124,7 @@ function parseCommandInvocation(msg: string): { region: LobbyRegion; code: strin
     }
 
     if (nextWord === "north") {
-        msg = msg.slice(nextWord.length).trim();
+        msg = msg.slice(nextWord.length).trim().toLowerCase();
 
         const nextNextWord = msg.slice(0, msg.indexOf(" "));
         if (nextNextWord === "america") {
@@ -129,6 +148,9 @@ function parseCommandInvocation(msg: string): { region: LobbyRegion; code: strin
         code: validateLobbyCode(msg),
     };
 }
+
+// Valid chars in a V2 (6-character) Among Us lobby code.
+const V2 = "QWXRTYLPESDFGHUJKZOCVBINMA";
 
 /**
  * Verifies the specified string as a lobby code. If it is valid, returns

@@ -10,6 +10,12 @@ const INFO = 0x0a96de;
 const ERROR = 0xfd5c5c;
 const WARN = 0xed872d;
 
+/**
+ * Creates a new loading message as response to the specified message
+ * and creates a new empty session with the specified region and code.
+ * The session does not start automatically and needs to be started using
+ * the session runner.
+ */
 export async function createEmptyNewSession(
     msg: eris.Message,
     region: LobbyRegion,
@@ -37,6 +43,9 @@ export async function createEmptyNewSession(
     return session;
 }
 
+/**
+ * Moves all players in `idFrom` to `idTo`.
+ */
 async function movePlayers(bot: eris.Client, session: AmongUsSession, idFrom: string, idTo: string) {
     await Promise.all(
         getMembersInChannel(idFrom).map(x =>
@@ -47,6 +56,10 @@ async function movePlayers(bot: eris.Client, session: AmongUsSession, idFrom: st
     );
 }
 
+/**
+ * Moves all players currently in the silence channel of the given
+ * among us session to the relevant talking channel.
+ */
 export async function movePlayersToTalkingChannel(bot: eris.Client, session: AmongUsSession) {
     await session.channels.init();
 
@@ -56,6 +69,10 @@ export async function movePlayersToTalkingChannel(bot: eris.Client, session: Amo
     await movePlayers(bot, session, silenceChannel.channelId, talkingChannel.channelId);
 }
 
+/**
+ * Moves all players currently in the talking channel of the given
+ * among us session to the relevant silence channel.
+ */
 export async function movePlayersToSilenceChannel(bot: eris.Client, session: AmongUsSession) {
     await session.channels.init();
 
@@ -65,6 +82,11 @@ export async function movePlayersToSilenceChannel(bot: eris.Client, session: Amo
     await movePlayers(bot, session, talkingChannel.channelId, silenceChannel.channelId);
 }
 
+/**
+ * Updates the message of the specified session with the notion
+ * that an error occurred during connecting. Does not remove the
+ * session itself.
+ */
 export async function updateMessageWithError(bot: eris.Client, session: AmongUsSession, error: string) {
     await bot.editMessage(session.channel, session.message, {
         embed: {
@@ -75,6 +97,11 @@ export async function updateMessageWithError(bot: eris.Client, session: AmongUsS
     });
 }
 
+/**
+ * Updates the message of the specified session with the notion
+ * that the session is over because the lobby was closed. Does not
+ * remove the session itself.
+ */
 export async function updateMessageWithSessionOver(bot: eris.Client, session: AmongUsSession) {
     await bot.editMessage(session.channel, session.message, {
         embed: {
@@ -85,6 +112,11 @@ export async function updateMessageWithSessionOver(bot: eris.Client, session: Am
     });
 }
 
+/**
+ * Updates the message for the specified among us session to the
+ * relevant content for the current session state. Should be invoked
+ * after the state of the session was changed.
+ */
 export async function updateMessage(bot: eris.Client, session: AmongUsSession) {
     if (session.state === SessionState.LOBBY) {
         await updateMessageToLobby(bot, session);
@@ -95,6 +127,10 @@ export async function updateMessage(bot: eris.Client, session: AmongUsSession) {
     }
 }
 
+/**
+ * Updates the message of the specified session to the content that
+ * the match is currently ongoing.
+ */
 async function updateMessageToPlaying(bot: eris.Client, session: AmongUsSession) {
     await session.channels.init();
     const mainChannel = session.channels.getItems().find(x => x.type === SessionChannelType.TALKING)!;
@@ -113,6 +149,10 @@ async function updateMessageToPlaying(bot: eris.Client, session: AmongUsSession)
     });
 }
 
+/**
+ * Updates the message of the specified session to the content that the
+ * session is currently in the lobby and that players are free to join.
+ */
 async function updateMessageToLobby(bot: eris.Client, session: AmongUsSession) {
     await session.channels.init();
     const mainChannel = session.channels.getItems().find(x => x.type === SessionChannelType.TALKING)!;

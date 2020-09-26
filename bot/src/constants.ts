@@ -13,5 +13,5 @@ export const enum SessionState {
 export const SERVER_IPS = {
     [LobbyRegion.EUROPE]: "172.105.251.170",
     [LobbyRegion.NORTH_AMERICA]: "198.58.99.71",
-    [LobbyRegion.ASIA]: "",
+    [LobbyRegion.ASIA]: "139.162.111.196",
 };

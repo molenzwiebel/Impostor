@@ -1,5 +1,6 @@
 import "dotenv/config";
 import Eris from "eris";
+import { cleanUpOldSessions } from "./actions";
 import { connectToDatabase } from "./database";
 import { onMessageCreated, onVoiceChange, onVoiceJoin, onVoiceLeave } from "./listeners";
 
@@ -19,6 +20,8 @@ const intents = Eris.Constants.Intents;
 
     await bot.connect();
     await new Promise(r => bot.once("ready", r));
+
+    await cleanUpOldSessions(bot);
 
     bot.on("messageCreate", onMessageCreated.bind(null, bot));
     bot.on("voiceChannelJoin", onVoiceJoin);

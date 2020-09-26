@@ -44,6 +44,31 @@ export async function createEmptyNewSession(
 }
 
 /**
+ * Helper function that queries all stale sessions currently in the database
+ * and ensures that they are cleaned up. No attempt is done at reconnecting
+ * to the server.
+ */
+export async function cleanUpOldSessions(bot: eris.Client) {
+    const sessions = await orm.em.find(AmongUsSession, {}, ["channels"]);
+    for (const session of sessions) {
+        await cleanUpSession(bot, session);
+    }
+}
+
+/**
+ * Similar to cleanUpOldSessions, but for a single old session.
+ */
+async function cleanUpSession(bot: eris.Client, session: AmongUsSession) {
+    await session.channels.init();
+    for (const channel of session.channels) {
+        await bot.deleteChannel(channel.channelId, "Among Us: Session is over.");
+    }
+
+    await updateMessageWithSessionStale(bot, session);
+    await orm.em.removeAndFlush(session);
+}
+
+/**
  * Moves all players in `idFrom` to `idTo`.
  */
 async function movePlayers(bot: eris.Client, session: AmongUsSession, idFrom: string, idTo: string) {
@@ -108,6 +133,21 @@ export async function updateMessageWithSessionOver(bot: eris.Client, session: Am
             color: ERROR,
             title: `🎲 Among Us - Session Over`,
             description: `${session.user} was hosting a game of [Among Us](http://www.innersloth.com/gameAmongUs.php) here, but the lobby closed.`,
+        },
+    });
+}
+
+/**
+ * Updates the message of the specified session with the notion
+ * that the session is over because the bot restarted during the
+ * game and was not able to reconnect.
+ */
+export async function updateMessageWithSessionStale(bot: eris.Client, session: AmongUsSession) {
+    await bot.editMessage(session.channel, session.message, {
+        embed: {
+            color: ERROR,
+            title: `🎲 Among Us - Session Over`,
+            description: `${session.user} was hosting a game of [Among Us](http://www.innersloth.com/gameAmongUs.php) here, but an unexpected error happened. Try again in a bit?`,
         },
     });
 }

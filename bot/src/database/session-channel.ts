@@ -41,8 +41,13 @@ export default class SessionChannel {
     }
 }
 
+export const TALKING_CHANNELS = [SessionChannelType.TALKING];
+
+export const SILENCE_CHANNELS = [SessionChannelType.ADMIN_SILENCE, SessionChannelType.SILENCE];
+
 export const enum SessionChannelType {
     TALKING = "talking",
     SILENCE = "silence",
     CATEGORY = "category",
+    ADMIN_SILENCE = "admin_silence",
 }

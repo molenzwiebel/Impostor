@@ -1,12 +1,29 @@
 import eris from "eris";
-import { createEmptyNewSession } from "./actions";
+import { createEmptyNewSession, movePlayersToSilenceChannel, movePlayersToTalkingChannel } from "./actions";
 import { LobbyRegion, SessionState } from "./constants";
 import { orm } from "./database";
-import SessionChannel, { SessionChannelType } from "./database/session-channel";
+import SessionChannel, { SILENCE_CHANNELS, TALKING_CHANNELS } from "./database/session-channel";
 import startSession from "./session-runner";
 
 const COMMAND_PREFIX = "!amongus ";
 const VOICE_CHANNEL_USERS = new Map<string, string[]>();
+const ADMIN_USERS = new Set<string>();
+
+/**
+ * Helper function that ensures that ADMIN_USERS is updated based on
+ * whether or not the specified member is an administrator or server owner.
+ */
+function updateAdminUserState(member: eris.Member) {
+    const isAdmin =
+        member.roles.some(x => member.guild.roles.get(x)!.permissions.has("administrator")) ||
+        member.guild.ownerID === member.id;
+
+    if (isAdmin) {
+        ADMIN_USERS.add(member.id);
+    } else {
+        ADMIN_USERS.delete(member.id);
+    }
+}
 
 /**
  * Invoked when the specified member joins the specified new voice channel.
@@ -15,6 +32,7 @@ const VOICE_CHANNEL_USERS = new Map<string, string[]>();
  * in progress will automatically be redirected to the silence channel.
  */
 export async function onVoiceJoin(member: eris.Member, newChannel: eris.VoiceChannel) {
+    updateAdminUserState(member);
     VOICE_CHANNEL_USERS.set(newChannel.id, [...(VOICE_CHANNEL_USERS.get(newChannel.id) || []), member.id]);
 
     // Check if this is a game voice channel and we're in game right now.
@@ -22,23 +40,20 @@ export async function onVoiceJoin(member: eris.Member, newChannel: eris.VoiceCha
         SessionChannel,
         {
             channelId: newChannel.id,
-            type: SessionChannelType.TALKING,
         },
         ["session"]
     );
 
     if (!relevantChannel) return;
 
-    // We're in game, move them to the silence channel.
-    if (relevantChannel.session.state === SessionState.PLAYING) {
-        await relevantChannel.session.channels.init();
-        const playingChannel = relevantChannel.session.channels
-            .getItems()
-            .find(x => x.type === SessionChannelType.SILENCE)!;
+    // If this is a talking channel and we're playing, move them to the playing channel.
+    if (TALKING_CHANNELS.includes(relevantChannel.type) && relevantChannel.session.state === SessionState.PLAYING) {
+        await movePlayersToSilenceChannel(member.guild.shard.client, relevantChannel.session);
+    }
 
-        await member.guild.editMember(member.id, {
-            channelID: playingChannel.channelId,
-        });
+    // If this is a playing channel and we're talking, move them to the talking channel.
+    if (SILENCE_CHANNELS.includes(relevantChannel.type) && relevantChannel.session.state !== SessionState.PLAYING) {
+        await movePlayersToTalkingChannel(member.guild.shard.client, relevantChannel.session);
     }
 }
 
@@ -46,6 +61,7 @@ export async function onVoiceJoin(member: eris.Member, newChannel: eris.VoiceCha
  * Invoked when the specified member leaves the specified channel.
  */
 export async function onVoiceLeave(member: eris.Member, oldChannel: eris.VoiceChannel) {
+    updateAdminUserState(member);
     const users = VOICE_CHANNEL_USERS.get(oldChannel.id);
     if (!users) return;
 
@@ -70,6 +86,13 @@ export async function onVoiceChange(member: eris.Member, newChannel: eris.VoiceC
  */
 export function getMembersInChannel(channel: string): string[] {
     return VOICE_CHANNEL_USERS.get(channel) || [];
+}
+
+/**
+ * Returns whether or not the specified user ID is an administrator.
+ */
+export function isMemberAdmin(id: string): boolean {
+    return ADMIN_USERS.has(id);
 }
 
 /**

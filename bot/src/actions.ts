@@ -2,8 +2,8 @@ import eris from "eris";
 import { LobbyRegion, SessionState } from "./constants";
 import { orm } from "./database";
 import AmongUsSession from "./database/among-us-session";
-import { SessionChannelType } from "./database/session-channel";
-import { getMembersInChannel } from "./listeners";
+import SessionChannel, { SessionChannelType, SILENCE_CHANNELS } from "./database/session-channel";
+import { getMembersInChannel, isMemberAdmin } from "./listeners";
 
 const LOADING = 0x36393f;
 const INFO = 0x0a96de;
@@ -71,7 +71,7 @@ async function cleanUpSession(bot: eris.Client, session: AmongUsSession) {
 /**
  * Moves all players in `idFrom` to `idTo`.
  */
-async function movePlayers(bot: eris.Client, session: AmongUsSession, idFrom: string, idTo: string) {
+async function moveAllPlayers(bot: eris.Client, session: AmongUsSession, idFrom: string, idTo: string) {
     await Promise.all(
         getMembersInChannel(idFrom).map(x =>
             bot.editGuildMember(session.guild, x, {
@@ -82,16 +82,16 @@ async function movePlayers(bot: eris.Client, session: AmongUsSession, idFrom: st
 }
 
 /**
- * Moves all players currently in the silence channel of the given
+ * Moves all players currently in the silence channels of the given
  * among us session to the relevant talking channel.
  */
 export async function movePlayersToTalkingChannel(bot: eris.Client, session: AmongUsSession) {
     await session.channels.init();
 
     const talkingChannel = session.channels.getItems().find(x => x.type === SessionChannelType.TALKING)!;
-    const silenceChannel = session.channels.getItems().find(x => x.type === SessionChannelType.SILENCE)!;
+    const silenceChannels = session.channels.getItems().filter(x => SILENCE_CHANNELS.includes(x.type));
 
-    await movePlayers(bot, session, silenceChannel.channelId, talkingChannel.channelId);
+    await Promise.all(silenceChannels.map(x => moveAllPlayers(bot, session, x.channelId, talkingChannel.channelId)));
 }
 
 /**
@@ -101,10 +101,61 @@ export async function movePlayersToTalkingChannel(bot: eris.Client, session: Amo
 export async function movePlayersToSilenceChannel(bot: eris.Client, session: AmongUsSession) {
     await session.channels.init();
 
+    const categoryChannel = session.channels.getItems().find(x => x.type === SessionChannelType.CATEGORY)!;
     const talkingChannel = session.channels.getItems().find(x => x.type === SessionChannelType.TALKING)!;
     const silenceChannel = session.channels.getItems().find(x => x.type === SessionChannelType.SILENCE)!;
 
-    await movePlayers(bot, session, talkingChannel.channelId, silenceChannel.channelId);
+    const playersInTalkingChannel = getMembersInChannel(talkingChannel.channelId);
+    const normalPlayersInTalkingChannel = playersInTalkingChannel.filter(x => !isMemberAdmin(x));
+
+    // Figure out which admin players need to get their own channel.
+    const adminPlayersInTalkingChannel = playersInTalkingChannel.filter(isMemberAdmin);
+    const emptyAdminChannels = session.channels
+        .getItems()
+        .filter(x => x.type === SessionChannelType.ADMIN_SILENCE && getMembersInChannel(x.channelId).length === 0);
+
+    for (const adminId of adminPlayersInTalkingChannel) {
+        const appropriateAdminChannel = emptyAdminChannels.pop();
+
+        if (appropriateAdminChannel) {
+            await bot.editGuildMember(session.guild, adminId, {
+                channelID: appropriateAdminChannel.channelId,
+            });
+            continue;
+        }
+
+        // We need to create an admin channel for this user.
+        await bot.createMessage(
+            session.channel,
+            `<@!${adminId}>, since you're an administrator I won't be able to mute you. Instead, you're getting your own channel.`
+        );
+
+        const adminChannel = await bot.createChannel(session.guild, "Among Us - Admin Playing Channel", 2, {
+            parentID: categoryChannel.channelId,
+            permissionOverwrites: [
+                {
+                    type: "role",
+                    id: session.guild,
+                    deny: eris.Constants.Permissions.voiceSpeak | eris.Constants.Permissions.readMessages,
+                    allow: 0,
+                },
+            ],
+        });
+        session.channels.add(new SessionChannel(adminChannel.id, SessionChannelType.ADMIN_SILENCE));
+
+        await bot.editGuildMember(session.guild, adminId, {
+            channelID: adminChannel.id,
+        });
+    }
+
+    // Move the normal players.
+    await Promise.all(
+        normalPlayersInTalkingChannel.map(id =>
+            bot.editGuildMember(session.guild, id, {
+                channelID: silenceChannel.channelId,
+            })
+        )
+    );
 }
 
 /**

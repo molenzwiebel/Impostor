@@ -3,11 +3,12 @@ import { LobbyRegion, SessionState } from "./constants";
 import { orm } from "./database";
 import AmongUsSession from "./database/among-us-session";
 import { SessionChannelType } from "./database/session-channel";
+import { getMembersInChannel } from "./listeners";
 
 const LOADING = 0x36393f;
 const INFO = 0x0a96de;
 const ERROR = 0xfd5c5c;
-const WARN = 0x0;
+const WARN = 0xed872d;
 
 export async function createEmptyNewSession(
     msg: eris.Message,
@@ -36,6 +37,34 @@ export async function createEmptyNewSession(
     return session;
 }
 
+async function movePlayers(bot: eris.Client, session: AmongUsSession, idFrom: string, idTo: string) {
+    await Promise.all(
+        getMembersInChannel(idFrom).map(x =>
+            bot.editGuildMember(session.guild, x, {
+                channelID: idTo,
+            })
+        )
+    );
+}
+
+export async function movePlayersToTalkingChannel(bot: eris.Client, session: AmongUsSession) {
+    await session.channels.init();
+
+    const talkingChannel = session.channels.getItems().find(x => x.type === SessionChannelType.TALKING)!;
+    const silenceChannel = session.channels.getItems().find(x => x.type === SessionChannelType.SILENCE)!;
+
+    await movePlayers(bot, session, silenceChannel.channelId, talkingChannel.channelId);
+}
+
+export async function movePlayersToSilenceChannel(bot: eris.Client, session: AmongUsSession) {
+    await session.channels.init();
+
+    const talkingChannel = session.channels.getItems().find(x => x.type === SessionChannelType.TALKING)!;
+    const silenceChannel = session.channels.getItems().find(x => x.type === SessionChannelType.SILENCE)!;
+
+    await movePlayers(bot, session, talkingChannel.channelId, silenceChannel.channelId);
+}
+
 export async function updateMessageWithError(bot: eris.Client, session: AmongUsSession, error: string) {
     await bot.editMessage(session.channel, session.message, {
         embed: {
@@ -60,6 +89,28 @@ export async function updateMessage(bot: eris.Client, session: AmongUsSession) {
     if (session.state === SessionState.LOBBY) {
         await updateMessageToLobby(bot, session);
     }
+
+    if (session.state === SessionState.PLAYING || session.state === SessionState.DISCUSSING) {
+        await updateMessageToPlaying(bot, session);
+    }
+}
+
+async function updateMessageToPlaying(bot: eris.Client, session: AmongUsSession) {
+    await session.channels.init();
+    const mainChannel = session.channels.getItems().find(x => x.type === SessionChannelType.TALKING)!;
+
+    await bot.editMessage(session.channel, session.message, {
+        embed: {
+            color: WARN,
+            title: `🎲 Among Us - ${session.region} - ${session.lobbyCode} (In Game)`,
+            description: `${session.user} is hosting a game of [Among Us](http://www.innersloth.com/gameAmongUs.php)! Join the voice channel <#${mainChannel.channelId}> or click [here](https://discord.gg/${mainChannel.invite}) to join the voice chat. ~~To join the Among Us lobby, select the **${session.region}** server and enter code \`${session.lobbyCode}\`.~~ The lobby is currently ongoing! You'll need to wait for the round to end before you can join.`,
+            footer: {
+                icon_url:
+                    "https://cdn.discordapp.com/icons/579772930607808537/2d2607a672f2529206edd929ef55173e.png?size=128",
+                text: "Reminder: the bot takes up a player spot!",
+            },
+        },
+    });
 }
 
 async function updateMessageToLobby(bot: eris.Client, session: AmongUsSession) {

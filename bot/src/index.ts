@@ -1,7 +1,7 @@
 import "dotenv/config";
 import Eris from "eris";
 import { connectToDatabase } from "./database";
-import { onMessageCreated } from "./listeners";
+import { onMessageCreated, onVoiceChange, onVoiceJoin, onVoiceLeave } from "./listeners";
 
 const intents = Eris.Constants.Intents;
 
@@ -21,6 +21,9 @@ const intents = Eris.Constants.Intents;
     await new Promise(r => bot.once("ready", r));
 
     bot.on("messageCreate", onMessageCreated.bind(null, bot));
+    bot.on("voiceChannelJoin", onVoiceJoin);
+    bot.on("voiceChannelLeave", onVoiceLeave);
+    bot.on("voiceChannelSwitch", onVoiceChange);
 
     console.log("[+] Connected to Discord as " + bot.user.username);
 })();

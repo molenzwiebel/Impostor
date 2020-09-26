@@ -1,7 +1,13 @@
 import child_process from "child_process";
 import eris from "eris";
 import path from "path";
-import { updateMessage, updateMessageWithError, updateMessageWithSessionOver } from "./actions";
+import {
+    movePlayersToSilenceChannel,
+    movePlayersToTalkingChannel,
+    updateMessage,
+    updateMessageWithError,
+    updateMessageWithSessionOver,
+} from "./actions";
 import { SERVER_IPS, SessionState } from "./constants";
 import { orm } from "./database";
 import AmongUsSession from "./database/among-us-session";
@@ -79,36 +85,47 @@ class SessionRunner {
                 },
             ],
         });
-        this.session.channels.add(new SessionChannel(mutedChannel.id, SessionChannelType.TALKING));
+        this.session.channels.add(new SessionChannel(mutedChannel.id, SessionChannelType.SILENCE));
 
         this.isConnected = true;
-        await this.setStateToLobby();
+        await this.setStateTo(SessionState.LOBBY);
     }
 
-    private async setStateToLobby() {
-        this.session.state = SessionState.LOBBY;
+    private async setStateTo(state: SessionState) {
+        this.session.state = state;
         await orm.em.flush();
         await updateMessage(this.bot, this.session);
     }
 
-    private handleClientStdout = (msg: string) => {
+    private handleClientStdout = async (msg: string) => {
         console.log("Got client: " + msg);
         const { type, ...rest } = JSON.parse(msg);
 
         if (type === "connect") {
-            this.handleConnect();
+            await this.handleConnect();
         }
 
         if (type === "gameEnd") {
-            this.setStateToLobby();
+            await this.setStateTo(SessionState.LOBBY);
+            await movePlayersToTalkingChannel(this.bot, this.session);
+        }
+
+        if (type === "talkingStart") {
+            await this.setStateTo(SessionState.DISCUSSING);
+            await movePlayersToTalkingChannel(this.bot, this.session);
+        }
+
+        if (type === "talkingEnd") {
+            await this.setStateTo(SessionState.PLAYING);
+            await movePlayersToSilenceChannel(this.bot, this.session);
         }
 
         if (type === "disconnect") {
-            this.handleDisconnect();
+            await this.handleDisconnect();
         }
 
         if (type === "error") {
-            this.handleError(rest.message);
+            await this.handleError(rest.message);
         }
     };
 }

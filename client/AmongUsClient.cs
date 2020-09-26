@@ -43,8 +43,8 @@ namespace client
         public event Action OnDisconnect;
 
         /// <summary>
-        /// Fired in moments when talking should be allowed, such as when the game ends
-        /// or when voting.
+        /// Fired in moments when talking should be allowed, such as when voting starts.
+        /// Note: does not fire when a game ends, you need OnGameEnd for that.
         /// </summary>
         public event Action OnTalkingStart;
 
@@ -53,6 +53,12 @@ namespace client
         /// where talking is not allowed, such as on game start or after a vote.
         /// </summary>
         public event Action OnTalkingEnd;
+
+        /// <summary>
+        /// Fired after a single game has ended and the bot is back in the lobby. This is
+        /// a separate event from talking start.
+        /// </summary>
+        public event Action OnGameEnd;
 
         /// <summary>
         /// Initializes this client by connecting to the specified host and attempting
@@ -100,7 +106,7 @@ namespace client
             {
                 // If it isn't JoinGame (which has a disconnect reason) just disconnect with unknown.
                 if (response.Tag != (byte) MMTags.JoinGame)
-                    throw new AUException("Connecting to the server failed with an unknown error.");
+                    throw new AUException("Connecting to the Among Us servers failed with an unknown error.");
 
                 var reason = (DisconnectReasons) response.ReadInt32();
 
@@ -226,7 +232,7 @@ namespace client
         /// </summary>
         private void HandleEndGame(MessageReader message)
         {
-            OnTalkingStart?.Invoke();
+            OnGameEnd?.Invoke();
 
             // Simply rejoin the same lobby.
             _connection.SendReliableMessage(JoinGame);

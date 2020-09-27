@@ -38,6 +38,9 @@ class SessionRunner {
         this.process.stdout!.setEncoding("utf-8");
         this.process.stdout!.on("data", this.handleClientStdout);
         this.process.stdout!.on("close", () => this.handleDisconnect());
+
+        this.process.stderr!.setEncoding("utf-8");
+        this.process.stderr!.on("data", console.log);
     }
 
     /**

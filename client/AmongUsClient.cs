@@ -1,4 +1,6 @@
 ﻿using System;
+using System.Collections.Generic;
+using System.Linq;
 using System.Net;
 using System.Threading.Tasks;
 using Hazel;
@@ -22,6 +24,10 @@ namespace client
 
         private uint _hostId; // the mm ID of the host of the current lobby
         private uint _clientId; // the mm ID of ourselves
+        private bool _hasPlayerData = false; // our first connect we briefly do a spawn to gather user data
+        private bool _hasReconnectedAfterPlayerData = false;
+
+        private List<PlayerData> _playerData = new List<PlayerData>();
 
         private IPAddress _address; // the address of the server we're connected to
         private ushort _port; // the port we're connected to
@@ -61,6 +67,12 @@ namespace client
         public event Action OnGameEnd;
 
         /// <summary>
+        /// Invoked when the player data is updated for one or more players. Also invoked
+        /// at the start with the list of all players that were already in the lobby.
+        /// </summary>
+        public event Action<List<PlayerData>> OnPlayerDataUpdate;
+
+        /// <summary>
         /// Initializes this client by connecting to the specified host and attempting
         /// to join the specified lobby code. Will throw if connection fails, else will
         /// start servicing messages in the background. The caller is responsible for
@@ -81,7 +93,28 @@ namespace client
 
             HandleJoinGameResult(response);
 
-            OnConnect?.Invoke();
+            if (!_hasPlayerData)
+            {
+                // If we don't have user data, send a SceneChange so that we receive a spawn.
+                _connection.SendReliableMessage(writer =>
+                {
+                    writer.StartMessage((byte) MMTags.GameData);
+                    writer.Write(_lobbyCode);
+                    writer.StartMessage((byte) GameDataTags.SceneChange);
+                    writer.WritePacked(_clientId); // note: must be _clientId since localplayer is not set yet
+                    writer.Write("OnlineGame");
+                    writer.EndMessage();
+                    writer.EndMessage();
+                });
+            }
+            else
+            {
+                // We have user data, invoke listeners.
+                _hasReconnectedAfterPlayerData = true;
+                
+                OnConnect?.Invoke();
+                OnPlayerDataUpdate?.Invoke(_playerData);
+            }
         }
 
         /// <summary>
@@ -187,14 +220,27 @@ namespace client
         }
 
         /// <summary>
-        /// Invoked for each data packet that contains game data. Checks if this is an RPC,
+        /// Invoked for each data packet that contains game data. Checks if this is an RPC or spawn,
         /// and if yes acts accordingly.
         /// </summary>
         private void HandleGameData(MessageReader reader)
         {
-            if (reader.Tag != (byte) GameDataTags.Rpc) return;
+            if (reader.Tag == (byte) GameDataTags.Rpc)
+            {
+                HandleRPC(reader);
+            }
+            else if (reader.Tag == (byte) GameDataTags.Spawn)
+            {
+                HandleSpawn(reader);
+            }
+        }
 
-            var target = reader.ReadPackedInt32();
+        /// <summary>
+        /// Handles an RPC game packet, dispatching the results when appropriate.
+        /// </summary>
+        private void HandleRPC(MessageReader reader)
+        {
+            reader.ReadPackedInt32(); // rpc target
             var action = (RPCCalls) reader.ReadByte();
 
             if (action == RPCCalls.Close)
@@ -205,6 +251,90 @@ namespace client
             {
                 OnTalkingStart?.Invoke();
             }
+            else if (action == RPCCalls.UpdateGameData)
+            {
+                if (!_hasReconnectedAfterPlayerData) return; // don't handle UpdateGameData earlier.
+                
+                foreach (var dataEntry in reader.Messages())
+                {
+                    UpdateOrCreatePlayerData(dataEntry, dataEntry.Tag);
+                }
+                
+                OnPlayerDataUpdate?.Invoke(_playerData);
+            }
+        }
+
+        /// <summary>
+        /// Handles a spawn game packet, updating the local player data state.
+        /// </summary>
+        private void HandleSpawn(MessageReader reader)
+        {
+            var spawnId = (SpawnableObjects) reader.ReadPackedUInt32();
+            var owner = reader.ReadPackedUInt32();
+            reader.ReadByte(); // flags
+            reader.ReadPackedInt32(); // component length
+
+            if (spawnId == SpawnableObjects.GameData)
+            {
+                reader.ReadPackedInt32(); // game data net id
+                var gameData = reader.ReadMessage();
+                var numPlayers = gameData.ReadPackedInt32();
+
+                for (var i = 0; i < numPlayers; i++)
+                {
+                    var playerId = gameData.ReadByte();
+                    UpdateOrCreatePlayerData(gameData, playerId);
+                }
+            }
+            else if (spawnId == SpawnableObjects.PlayerControl)
+            {
+                reader.ReadPackedInt32(); // player control net id
+                var controlData = reader.ReadMessage();
+                controlData.ReadByte(); // unk, seems to be 1 if us, else 0
+                var playerId = controlData.ReadByte(); // this is us, we got to ignore us
+
+                // If this is us (only for the brief initial connect), ignore it.
+                if (owner == _clientId) return;
+                
+                // Either join an existing entry or create a new one.
+                var existing = _playerData.Find(x => x.id == playerId);
+                if (existing != null)
+                {
+                    existing.clientId = owner;
+                }
+                else
+                {
+                    _playerData.Add(new PlayerData(owner, playerId));
+                }
+                
+                // Update if this is not the initial data gathering state.
+                if (_hasPlayerData)
+                {
+                    OnPlayerDataUpdate?.Invoke(_playerData);
+                }
+
+                // Check if we have the data on everyone, and if yes disconnect and reconnect.
+                if (!_hasPlayerData && _playerData.All(x => x.clientId != 0))
+                {
+                    _hasPlayerData = true;
+                    DisconnectAndReconnect();
+                }
+            }
+        }
+        
+        /// <summary>
+        /// Helper function that parses a PlayerData instance from the specified
+        /// reader and updates the local copy of the player data with the info.
+        /// </summary>
+        private void UpdateOrCreatePlayerData(MessageReader reader, byte playerId)
+        {
+            var player = _playerData.Find(x => x.id == playerId);
+            if (player == null)
+            {
+                _playerData.Add(player = new PlayerData(0, playerId));
+            }
+            
+            player.Deserialize(reader);
         }
 
         /// <summary>
@@ -232,6 +362,8 @@ namespace client
         /// </summary>
         private void HandleEndGame(MessageReader message)
         {
+            _playerData.Clear(); // we can't assume everyone rejoins
+            OnPlayerDataUpdate?.Invoke(_playerData);
             OnGameEnd?.Invoke();
 
             // Simply rejoin the same lobby.
@@ -245,26 +377,39 @@ namespace client
         private async void HandleRemovePlayer(MessageReader reader)
         {
             reader.ReadInt32(); // room code
-            reader.ReadInt32(); // id that left
+            var idThatLeft = reader.ReadInt32(); // id that left
             var newHost = reader.ReadUInt32();
             reader.ReadByte(); // disconnect reason
 
+            // Update the game data by removing the player that left.
             _hostId = newHost;
+            _playerData = _playerData.Where(x => x.clientId != idThatLeft).ToList();
+            OnPlayerDataUpdate?.Invoke(_playerData);
 
             // If we're the host now, leave and attempt to rejoin to make someone else host.
             if (newHost == _clientId)
             {
-                _connection.RemoveDisconnectListeners();
-                _connection.Disconnect("I don't want to be the host");
+                await DisconnectAndReconnect();
+            }
+        }
 
-                try
-                {
-                    await Connect(_address, _lobbyName, _port);
-                }
-                catch
-                {
-                    OnDisconnect?.Invoke();
-                }
+        /// <summary>
+        /// Helper that disconnects and reconnects to the lobby. Used after a game and
+        /// when we have gathered all info we needed from spawning ourselves. Will not
+        /// invoke the disconnect handler, unless the connecting fails.
+        /// </summary>
+        private async Task DisconnectAndReconnect()
+        {
+            _connection.RemoveDisconnectListeners();
+            _connection.Disconnect("I don't want to be the host");
+
+            try
+            {
+                await Connect(_address, _lobbyName, _port);
+            }
+            catch
+            {
+                OnDisconnect?.Invoke();
             }
         }
 

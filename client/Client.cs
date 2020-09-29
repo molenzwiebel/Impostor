@@ -20,6 +20,7 @@ namespace client
             client.OnTalkingEnd += () => WriteMessage(new {type = "talkingEnd"});
             client.OnTalkingStart += () => WriteMessage(new {type = "talkingStart"});
             client.OnGameEnd += () => WriteMessage(new {type = "gameEnd"});
+            client.OnPlayerDataUpdate += data => WriteMessage(new {type = "gameData", data});
 
             try
             {

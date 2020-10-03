@@ -28,6 +28,7 @@ namespace client
         private bool _hasReconnectedAfterPlayerData = false;
 
         private List<PlayerData> _playerData = new List<PlayerData>();
+        private Dictionary<int, int> _playerControlNetIdToPlayerId = new Dictionary<int, int>();
 
         private IPAddress _address; // the address of the server we're connected to
         private ushort _port; // the port we're connected to
@@ -262,6 +263,14 @@ namespace client
                 
                 OnPlayerDataUpdate?.Invoke(_playerData);
             }
+            else if (action == RPCCalls.MurderPlayer)
+            {
+                var victim = reader.ReadPackedInt32();
+                var victimPlayerId = _playerControlNetIdToPlayerId[victim];
+
+                _playerData.Find(x => x.id == victimPlayerId).statusBitField |= 4; // dead
+                OnPlayerDataUpdate?.Invoke(_playerData);
+            }
         }
 
         /// <summary>
@@ -288,10 +297,12 @@ namespace client
             }
             else if (spawnId == SpawnableObjects.PlayerControl)
             {
-                reader.ReadPackedInt32(); // player control net id
+                var netId = reader.ReadPackedInt32(); // player control net id
                 var controlData = reader.ReadMessage();
                 controlData.ReadByte(); // unk, seems to be 1 if us, else 0
                 var playerId = controlData.ReadByte(); // this is us, we got to ignore us
+
+                _playerControlNetIdToPlayerId[netId] = playerId;
 
                 // If this is us (only for the brief initial connect), ignore it.
                 if (owner == _clientId) return;
@@ -362,7 +373,6 @@ namespace client
         /// </summary>
         private void HandleEndGame(MessageReader message)
         {
-            _playerData.Clear(); // we can't assume everyone rejoins
             OnPlayerDataUpdate?.Invoke(_playerData);
             OnGameEnd?.Invoke();
 

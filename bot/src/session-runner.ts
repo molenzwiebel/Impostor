@@ -2,14 +2,16 @@ import child_process from "child_process";
 import eris from "eris";
 import path from "path";
 import {
-    addColorReactions,
+    addMessageReactions,
     movePlayersToSilenceChannel,
     movePlayersToTalkingChannel,
+    mutePlayerInChannels,
+    unmutePlayerInChannels,
     updateMessage,
     updateMessageWithError,
     updateMessageWithSessionOver,
 } from "./actions";
-import { EMOTE_IDS_TO_COLOR, SERVER_IPS, SessionState, SHORT_REGION_NAMES } from "./constants";
+import { EMOTE_IDS_TO_COLOR, GROUPING_TOGGLE_EMOJI, SERVER_IPS, SessionState, SHORT_REGION_NAMES } from "./constants";
 import { orm } from "./database";
 import AmongUsSession from "./database/among-us-session";
 import PlayerLink from "./database/player-link";
@@ -28,7 +30,7 @@ export interface PlayerData {
     statusBitField: number;
 }
 
-const enum PlayerDataFlags {
+export const enum PlayerDataFlags {
     DISCONNECTED = 1,
     IMPOSTOR = 2,
     DEAD = 4,
@@ -69,6 +71,11 @@ class SessionRunner {
      * emoji id. It is already verified that emojiId is a valid color reaction.
      */
     public async handleEmojiSelection(emojiId: string, userId: string) {
+        if (emojiId === GROUPING_TOGGLE_EMOJI.split(":")[1]) {
+            await this.toggleImpostorGrouping(userId);
+            return;
+        }
+
         const selectedColor = EMOTE_IDS_TO_COLOR[emojiId];
         if (selectedColor === undefined) return;
 
@@ -95,6 +102,19 @@ class SessionRunner {
         if (this.deadPlayers.has(relevantPlayer.clientId)) {
             this.mutePlayer(relevantPlayer.clientId).catch(() => {});
         }
+    }
+
+    /**
+     * Handles the usage of the toggle impostor grouping react by any user.
+     */
+    private async toggleImpostorGrouping(userId: string) {
+        if (userId !== this.session.creator || this.session.state !== SessionState.LOBBY) {
+            return;
+        }
+
+        this.session.groupImpostors = !this.session.groupImpostors;
+        await orm.em.persistAndFlush(this.session);
+        await this.updateMessage();
     }
 
     /**
@@ -168,7 +188,7 @@ class SessionRunner {
         this.session.channels.add(new SessionChannel(mutedChannel.id, SessionChannelType.SILENCE));
 
         this.isConnected = true;
-        await Promise.all([this.setStateTo(SessionState.LOBBY), addColorReactions(this.bot, this.session)]);
+        await Promise.all([this.setStateTo(SessionState.LOBBY), addMessageReactions(this.bot, this.session)]);
     }
 
     /**
@@ -227,30 +247,15 @@ class SessionRunner {
         const link = this.session.links.getItems().find(x => x.clientId === "" + clientId);
         if (!link) return;
 
-        const mainChannel = this.session.channels.getItems().find(x => x.type === SessionChannelType.TALKING);
-        if (!mainChannel) return; // should never happen
-
         this.mutedPlayers.add(link.snowflake);
-        await this.bot.editChannelPermission(
-            mainChannel.channelId,
-            link.snowflake,
-            0,
-            eris.Constants.Permissions.voiceSpeak,
-            "member"
-        );
+        await mutePlayerInChannels(this.bot, this.session, link.snowflake);
     }
 
     /**
      * Unmutes all players in the main channel that were previously muted.
      */
     private async unmutePlayers() {
-        await this.session.channels.init();
-
-        const mainChannel = this.session.channels.getItems().find(x => x.type === SessionChannelType.TALKING);
-        if (!mainChannel) return; // should never happen
-
-        await Promise.all([...this.mutedPlayers].map(x => this.bot.deleteChannelPermission(mainChannel.channelId, x)));
-
+        await Promise.all([...this.mutedPlayers].map(x => unmutePlayerInChannels(this.bot, this.session, x)));
         this.mutedPlayers.clear();
     }
 

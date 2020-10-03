@@ -37,6 +37,12 @@ export default class AmongUsSession {
     user!: string;
 
     /**
+     * The snowflake of the user that invoked the command.
+     */
+    @Property()
+    creator!: string;
+
+    /**
      * The state this session is in (discussing/playing).
      */
     @Enum()
@@ -53,6 +59,12 @@ export default class AmongUsSession {
      */
     @Property()
     lobbyCode!: string;
+
+    /**
+     * Whether or not impostors should be in the same voice channel.
+     */
+    @Property()
+    groupImpostors!: boolean;
 
     /**
      * The channels created by this session.

@@ -1,10 +1,22 @@
 import eris from "eris";
-import { COLOR_EMOTES, LobbyRegion, SessionState } from "./constants";
+import {
+    COLOR_EMOTES,
+    DEAD_COLOR_EMOTES,
+    GROUPING_DISABLED_EMOJI,
+    GROUPING_ENABLED_EMOJI,
+    GROUPING_TOGGLE_EMOJI,
+    LobbyRegion,
+    SessionState,
+} from "./constants";
 import { orm } from "./database";
 import AmongUsSession from "./database/among-us-session";
-import SessionChannel, { SessionChannelType, SILENCE_CHANNELS } from "./database/session-channel";
+import SessionChannel, {
+    MUTE_IF_DEAD_CHANNELS,
+    SessionChannelType,
+    SILENCE_CHANNELS,
+} from "./database/session-channel";
 import { getMembersInChannel, isMemberAdmin } from "./listeners";
-import { PlayerData } from "./session-runner";
+import { PlayerData, PlayerDataFlags } from "./session-runner";
 
 const LOADING = 0x36393f;
 const INFO = 0x0a96de;
@@ -35,9 +47,11 @@ export async function createEmptyNewSession(
     session.channel = msg.channel.id;
     session.message = message.id;
     session.user = msg.author.username;
+    session.creator = msg.author.id;
     session.state = SessionState.LOBBY;
     session.region = region;
     session.lobbyCode = code;
+    session.groupImpostors = false;
     await orm.em.persist(session);
     await orm.em.flush();
 
@@ -160,6 +174,34 @@ export async function movePlayersToSilenceChannel(bot: eris.Client, session: Amo
 }
 
 /**
+ * Mutes the specified player in all channels where people can normally talk.
+ */
+export async function mutePlayerInChannels(bot: eris.Client, session: AmongUsSession, snowflake: string) {
+    await session.channels.init();
+
+    for (const channel of session.channels.getItems().filter(x => MUTE_IF_DEAD_CHANNELS.includes(x.type))) {
+        await bot.editChannelPermission(
+            channel.channelId,
+            snowflake,
+            0,
+            eris.Constants.Permissions.voiceSpeak,
+            "member"
+        );
+    }
+}
+
+/**
+ * Unmutes the specified player from all channels where people can normally talk.
+ */
+export async function unmutePlayerInChannels(bot: eris.Client, session: AmongUsSession, snowflake: string) {
+    await session.channels.init();
+
+    for (const channel of session.channels.getItems().filter(x => MUTE_IF_DEAD_CHANNELS.includes(x.type))) {
+        await bot.deleteChannelPermission(channel.channelId, snowflake);
+    }
+}
+
+/**
  * Updates the message of the specified session with the notion
  * that an error occurred during connecting. Does not remove the
  * session itself.
@@ -214,7 +256,9 @@ export async function updateMessageWithSessionStale(bot: eris.Client, session: A
  * Adds all the different crewmate color reactions to the message created by
  * the bot, so that players can associate themselves with an ingame player.
  */
-export async function addColorReactions(bot: eris.Client, session: AmongUsSession) {
+export async function addMessageReactions(bot: eris.Client, session: AmongUsSession) {
+    await bot.addMessageReaction(session.channel, session.message, GROUPING_TOGGLE_EMOJI);
+
     for (const emote of Object.values(COLOR_EMOTES)) {
         await bot.addMessageReaction(session.channel, session.message, emote);
     }
@@ -238,7 +282,8 @@ export async function updateMessage(bot: eris.Client, session: AmongUsSession, p
 function formatPlayerText(session: AmongUsSession, playerData: PlayerData[]) {
     let playerText = "**Current Players**:\n";
     for (const p of playerData) {
-        playerText += `<:${COLOR_EMOTES[p.color]}> ${p.name}`;
+        const emoteMap = (p.statusBitField & PlayerDataFlags.DEAD) !== 0 ? COLOR_EMOTES : DEAD_COLOR_EMOTES;
+        playerText += `<:${emoteMap[p.color]}> ${p.name}`;
         const link = session.links.getItems().find(x => x.clientId === "" + p.clientId);
         if (link) {
             playerText += ` (<@!${link.snowflake}>)`;
@@ -256,24 +301,27 @@ async function updateMessageToPlaying(bot: eris.Client, session: AmongUsSession,
     await session.channels.init();
     const mainChannel = session.channels.getItems().find(x => x.type === SessionChannelType.TALKING)!;
 
+    const groupingText = session.groupImpostors
+        ? `Impostors will be put in a shared voice channel and will be able to communicate during the game. Normal players will not be able to see who the impostors are. ${session.user} can react with <:${GROUPING_TOGGLE_EMOJI}> **after this round is over** to disable this.`
+        : `Want an extra challenge? Impostors can be automatically put in the same voice channel to allow them to communicate during the game. This will not reveal to the other players who the impostors are. ${session.user} can react with <:${GROUPING_TOGGLE_EMOJI}> **after this round is over** to enable this.`;
+
     await bot.editMessage(session.channel, session.message, {
         embed: {
             color: WARN,
             title: `🎲 Among Us - ${session.region} - ${session.lobbyCode} (In Game)`,
-            description: `${
-                session.user
-            } is hosting a game of [Among Us](http://www.innersloth.com/gameAmongUs.php)! Join the voice channel <#${
-                mainChannel.channelId
-            }> or click [here](https://discord.gg/${
-                mainChannel.invite
-            }) to join the voice chat. ~~To join the Among Us lobby, select the **${
-                session.region
-            }** server and enter code \`${
-                session.lobbyCode
-            }\`.~~ The lobby is currently ongoing! You'll need to wait for the round to end before you can join.\n\n${formatPlayerText(
-                session,
-                playerData
-            )}`,
+            description: `${session.user} is hosting a game of [Among Us](http://www.innersloth.com/gameAmongUs.php)! Join the voice channel <#${mainChannel.channelId}> or click [here](https://discord.gg/${mainChannel.invite}) to join the voice chat. ~~To join the Among Us lobby, select the **${session.region}** server and enter code \`${session.lobbyCode}\`.~~ The lobby is currently ongoing! You'll need to wait for the round to end before you can join.`,
+            fields: [
+                {
+                    name: "Current Players",
+                    value: formatPlayerText(session, playerData),
+                },
+                {
+                    name: session.groupImpostors
+                        ? GROUPING_ENABLED_EMOJI + " Impostors Are Grouped"
+                        : GROUPING_DISABLED_EMOJI + " Impostors Not Grouped",
+                    value: groupingText,
+                },
+            ],
             footer: {
                 icon_url:
                     "https://cdn.discordapp.com/icons/579772930607808537/2d2607a672f2529206edd929ef55173e.png?size=128",
@@ -292,22 +340,27 @@ async function updateMessageToLobby(bot: eris.Client, session: AmongUsSession, p
     await session.links.init();
     const mainChannel = session.channels.getItems().find(x => x.type === SessionChannelType.TALKING)!;
 
+    const groupingText = session.groupImpostors
+        ? `Impostors will be put in a shared voice channel and will be able to communicate during the game. Normal players will not be able to see who the impostors are. ${session.user} can react with <:${GROUPING_TOGGLE_EMOJI}> to disable this.`
+        : `Want an extra challenge? Impostors can be automatically put in the same voice channel to allow them to communicate during the game. This will not reveal to the other players who the impostors are. ${session.user} can react with <:${GROUPING_TOGGLE_EMOJI}> to enable this.`;
+
     await bot.editMessage(session.channel, session.message, {
         embed: {
             color: INFO,
             title: `🎲 Among Us - ${session.region} - ${session.lobbyCode}`,
-            description: `${
-                session.user
-            } is hosting a game of [Among Us](http://www.innersloth.com/gameAmongUs.php)! Join the voice channel <#${
-                mainChannel.channelId
-            }> or click [here](https://discord.gg/${
-                mainChannel.invite
-            }) to join the voice chat. To join the Among Us lobby, select the **${
-                session.region
-            }** server and enter code \`${session.lobbyCode}\`.\n\n${formatPlayerText(
-                session,
-                playerData
-            )}\n\nWant to automatically be muted once you die? React with your color to associate your Discord with your Among Us character.`,
+            description: `${session.user} is hosting a game of [Among Us](http://www.innersloth.com/gameAmongUs.php)! Join the voice channel <#${mainChannel.channelId}> or click [here](https://discord.gg/${mainChannel.invite}) to join the voice chat. To join the Among Us lobby, select the **${session.region}** server and enter code \`${session.lobbyCode}\`.\n\nReact with your color to associate your Discord with your Among Us character! This will automatically mute you once you die and group you together with the other impostors if enabled.`,
+            fields: [
+                {
+                    name: "Current Players",
+                    value: formatPlayerText(session, playerData),
+                },
+                {
+                    name: session.groupImpostors
+                        ? GROUPING_ENABLED_EMOJI + " Impostors Are Grouped"
+                        : GROUPING_DISABLED_EMOJI + " Impostors Not Grouped",
+                    value: groupingText,
+                },
+            ],
             footer: {
                 icon_url:
                     "https://cdn.discordapp.com/icons/579772930607808537/2d2607a672f2529206edd929ef55173e.png?size=128",

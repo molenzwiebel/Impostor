@@ -43,11 +43,20 @@ export default class SessionChannel {
 
 export const TALKING_CHANNELS = [SessionChannelType.TALKING];
 
-export const SILENCE_CHANNELS = [SessionChannelType.ADMIN_SILENCE, SessionChannelType.SILENCE];
+export const SILENCE_CHANNELS = [
+    SessionChannelType.ADMIN_SILENCE,
+    SessionChannelType.SILENCE,
+    SessionChannelType.SINGLE_PLAYER_SILENCE,
+    SessionChannelType.IMPOSTORS,
+];
+
+export const MUTE_IF_DEAD_CHANNELS = [SessionChannelType.TALKING, SessionChannelType.IMPOSTORS];
 
 export const enum SessionChannelType {
     TALKING = "talking",
     SILENCE = "silence",
     CATEGORY = "category",
     ADMIN_SILENCE = "admin_silence",
+    SINGLE_PLAYER_SILENCE = "single_player_silence",
+    IMPOSTORS = "impostors",
 }

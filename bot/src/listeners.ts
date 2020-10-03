@@ -1,9 +1,10 @@
-import eris from "eris";
+import eris, { Emoji, PossiblyUncachedMessage } from "eris";
 import { createEmptyNewSession, movePlayersToSilenceChannel, movePlayersToTalkingChannel } from "./actions";
-import { LobbyRegion, SessionState } from "./constants";
+import { COLOR_EMOTE_IDS, LobbyRegion, SessionState } from "./constants";
 import { orm } from "./database";
+import AmongUsSession from "./database/among-us-session";
 import SessionChannel, { SILENCE_CHANNELS, TALKING_CHANNELS } from "./database/session-channel";
-import startSession from "./session-runner";
+import startSession, { getRunnerForSession } from "./session-runner";
 
 const COMMAND_PREFIX = "!amongus ";
 const VOICE_CHANNEL_USERS = new Map<string, string[]>();
@@ -93,6 +94,36 @@ export function getMembersInChannel(channel: string): string[] {
  */
 export function isMemberAdmin(id: string): boolean {
     return ADMIN_USERS.has(id);
+}
+
+/**
+ * Invoked when a reaction is added to any message. We will use it to process
+ * player links.
+ */
+export async function onReactionAdded(
+    bot: eris.Client,
+    message: PossiblyUncachedMessage,
+    emoji: Emoji,
+    userID: string
+) {
+    if (!COLOR_EMOTE_IDS.includes(emoji.id)) return;
+    if (userID === bot.user.id) return;
+
+    const session = await orm.em.findOne(AmongUsSession, {
+        message: message.id,
+    });
+    if (!session) return;
+
+    // Remove the reaction.
+    await bot
+        .removeMessageReaction(message.channel.id, message.id, emoji.name + ":" + emoji.id, userID)
+        .catch(() => {});
+
+    // Attempt to forward it to the session runner.
+    const runner = getRunnerForSession(session);
+    if (runner) {
+        await runner.handleEmojiSelection(emoji.id, userID);
+    }
 }
 
 /**

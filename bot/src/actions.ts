@@ -1,9 +1,10 @@
 import eris from "eris";
-import { LobbyRegion, SessionState } from "./constants";
+import { COLOR_EMOTES, LobbyRegion, SessionState } from "./constants";
 import { orm } from "./database";
 import AmongUsSession from "./database/among-us-session";
 import SessionChannel, { SessionChannelType, SILENCE_CHANNELS } from "./database/session-channel";
 import { getMembersInChannel, isMemberAdmin } from "./listeners";
+import { PlayerData } from "./session-runner";
 
 const LOADING = 0x36393f;
 const INFO = 0x0a96de;
@@ -130,7 +131,7 @@ export async function movePlayersToSilenceChannel(bot: eris.Client, session: Amo
             `<@!${adminId}>, since you're an administrator I won't be able to mute you. Instead, you're getting your own channel.`
         );
 
-        const adminChannel = await bot.createChannel(session.guild, "Among Us - Admin Playing Channel", 2, {
+        const adminChannel = await bot.createChannel(session.guild, "Muted (Admin)", 2, {
             parentID: categoryChannel.channelId,
             permissionOverwrites: [
                 {
@@ -171,6 +172,8 @@ export async function updateMessageWithError(bot: eris.Client, session: AmongUsS
             description: `${error}`,
         },
     });
+
+    await bot.removeMessageReactions(session.channel, session.message);
 }
 
 /**
@@ -186,6 +189,8 @@ export async function updateMessageWithSessionOver(bot: eris.Client, session: Am
             description: `${session.user} was hosting a game of [Among Us](http://www.innersloth.com/gameAmongUs.php) here, but the lobby closed.`,
         },
     });
+
+    await bot.removeMessageReactions(session.channel, session.message);
 }
 
 /**
@@ -201,6 +206,18 @@ export async function updateMessageWithSessionStale(bot: eris.Client, session: A
             description: `${session.user} was hosting a game of [Among Us](http://www.innersloth.com/gameAmongUs.php) here, but an unexpected error happened. Try again in a bit?`,
         },
     });
+
+    await bot.removeMessageReactions(session.channel, session.message);
+}
+
+/**
+ * Adds all the different crewmate color reactions to the message created by
+ * the bot, so that players can associate themselves with an ingame player.
+ */
+export async function addColorReactions(bot: eris.Client, session: AmongUsSession) {
+    for (const emote of Object.values(COLOR_EMOTES)) {
+        await bot.addMessageReaction(session.channel, session.message, emote);
+    }
 }
 
 /**
@@ -208,21 +225,34 @@ export async function updateMessageWithSessionStale(bot: eris.Client, session: A
  * relevant content for the current session state. Should be invoked
  * after the state of the session was changed.
  */
-export async function updateMessage(bot: eris.Client, session: AmongUsSession) {
+export async function updateMessage(bot: eris.Client, session: AmongUsSession, playerData: PlayerData[]) {
     if (session.state === SessionState.LOBBY) {
-        await updateMessageToLobby(bot, session);
+        await updateMessageToLobby(bot, session, playerData);
     }
 
     if (session.state === SessionState.PLAYING || session.state === SessionState.DISCUSSING) {
-        await updateMessageToPlaying(bot, session);
+        await updateMessageToPlaying(bot, session, playerData);
     }
+}
+
+function formatPlayerText(session: AmongUsSession, playerData: PlayerData[]) {
+    let playerText = "**Current Players**:\n";
+    for (const p of playerData) {
+        playerText += `<:${COLOR_EMOTES[p.color]}> ${p.name}`;
+        const link = session.links.getItems().find(x => x.clientId === "" + p.clientId);
+        if (link) {
+            playerText += ` (<@!${link.snowflake}>)`;
+        }
+        playerText += "\n";
+    }
+    return playerText.trim();
 }
 
 /**
  * Updates the message of the specified session to the content that
  * the match is currently ongoing.
  */
-async function updateMessageToPlaying(bot: eris.Client, session: AmongUsSession) {
+async function updateMessageToPlaying(bot: eris.Client, session: AmongUsSession, playerData: PlayerData[]) {
     await session.channels.init();
     const mainChannel = session.channels.getItems().find(x => x.type === SessionChannelType.TALKING)!;
 
@@ -230,7 +260,20 @@ async function updateMessageToPlaying(bot: eris.Client, session: AmongUsSession)
         embed: {
             color: WARN,
             title: `🎲 Among Us - ${session.region} - ${session.lobbyCode} (In Game)`,
-            description: `${session.user} is hosting a game of [Among Us](http://www.innersloth.com/gameAmongUs.php)! Join the voice channel <#${mainChannel.channelId}> or click [here](https://discord.gg/${mainChannel.invite}) to join the voice chat. ~~To join the Among Us lobby, select the **${session.region}** server and enter code \`${session.lobbyCode}\`.~~ The lobby is currently ongoing! You'll need to wait for the round to end before you can join.`,
+            description: `${
+                session.user
+            } is hosting a game of [Among Us](http://www.innersloth.com/gameAmongUs.php)! Join the voice channel <#${
+                mainChannel.channelId
+            }> or click [here](https://discord.gg/${
+                mainChannel.invite
+            }) to join the voice chat. ~~To join the Among Us lobby, select the **${
+                session.region
+            }** server and enter code \`${
+                session.lobbyCode
+            }\`.~~ The lobby is currently ongoing! You'll need to wait for the round to end before you can join.\n\n${formatPlayerText(
+                session,
+                playerData
+            )}`,
             footer: {
                 icon_url:
                     "https://cdn.discordapp.com/icons/579772930607808537/2d2607a672f2529206edd929ef55173e.png?size=128",
@@ -244,15 +287,27 @@ async function updateMessageToPlaying(bot: eris.Client, session: AmongUsSession)
  * Updates the message of the specified session to the content that the
  * session is currently in the lobby and that players are free to join.
  */
-async function updateMessageToLobby(bot: eris.Client, session: AmongUsSession) {
+async function updateMessageToLobby(bot: eris.Client, session: AmongUsSession, playerData: PlayerData[]) {
     await session.channels.init();
+    await session.links.init();
     const mainChannel = session.channels.getItems().find(x => x.type === SessionChannelType.TALKING)!;
 
     await bot.editMessage(session.channel, session.message, {
         embed: {
             color: INFO,
             title: `🎲 Among Us - ${session.region} - ${session.lobbyCode}`,
-            description: `${session.user} is hosting a game of [Among Us](http://www.innersloth.com/gameAmongUs.php)! Join the voice channel <#${mainChannel.channelId}> or click [here](https://discord.gg/${mainChannel.invite}) to join the voice chat. To join the Among Us lobby, select the **${session.region}** server and enter code \`${session.lobbyCode}\`.`,
+            description: `${
+                session.user
+            } is hosting a game of [Among Us](http://www.innersloth.com/gameAmongUs.php)! Join the voice channel <#${
+                mainChannel.channelId
+            }> or click [here](https://discord.gg/${
+                mainChannel.invite
+            }) to join the voice chat. To join the Among Us lobby, select the **${
+                session.region
+            }** server and enter code \`${session.lobbyCode}\`.\n\n${formatPlayerText(
+                session,
+                playerData
+            )}\n\nWant to automatically be muted once you die? React with your color to associate your Discord with your Among Us character.`,
             footer: {
                 icon_url:
                     "https://cdn.discordapp.com/icons/579772930607808537/2d2607a672f2529206edd929ef55173e.png?size=128",

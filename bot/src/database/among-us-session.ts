@@ -1,5 +1,6 @@
 import { Collection, Entity, Enum, OneToMany, PrimaryKey, Property } from "@mikro-orm/core";
 import { LobbyRegion, SessionState } from "../constants";
+import PlayerLink from "./player-link";
 import SessionChannel from "./session-channel";
 
 /**
@@ -58,4 +59,10 @@ export default class AmongUsSession {
      */
     @OneToMany(() => SessionChannel, channel => channel.session)
     channels = new Collection<SessionChannel>(this);
+
+    /**
+     * The player links associated with this session.
+     */
+    @OneToMany(() => PlayerLink, link => link.session)
+    links = new Collection<PlayerLink>(this);
 }

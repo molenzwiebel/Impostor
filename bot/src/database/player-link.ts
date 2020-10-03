@@ -27,4 +27,9 @@ export default class PlayerLink {
      */
     @Property()
     snowflake!: string;
+
+    constructor(clientId: string, snowflake: string) {
+        this.clientId = clientId;
+        this.snowflake = snowflake;
+    }
 }

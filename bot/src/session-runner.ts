@@ -1,5 +1,6 @@
 import child_process from "child_process";
 import eris from "eris";
+import debounce from "lodash.debounce";
 import path from "path";
 import {
     addMessageReactions,
@@ -11,7 +12,14 @@ import {
     updateMessageWithError,
     updateMessageWithSessionOver,
 } from "./actions";
-import { EMOTE_IDS_TO_COLOR, GROUPING_TOGGLE_EMOJI, SERVER_IPS, SessionState, SHORT_REGION_NAMES } from "./constants";
+import {
+    EMOTE_IDS_TO_COLOR,
+    GROUPING_TOGGLE_EMOJI,
+    LEAVE_EMOJI,
+    SERVER_IPS,
+    SessionState,
+    SHORT_REGION_NAMES,
+} from "./constants";
 import { orm } from "./database";
 import AmongUsSession from "./database/among-us-session";
 import PlayerLink from "./database/player-link";
@@ -28,6 +36,7 @@ export interface PlayerData {
     name: string;
     color: number;
     statusBitField: number;
+    tasks: unknown[];
 }
 
 export const enum PlayerDataFlags {
@@ -58,8 +67,19 @@ class SessionRunner {
             cwd: WORKING_DIR,
         });
 
+        let buffered = "";
+
         this.process.stdout!.setEncoding("utf-8");
-        this.process.stdout!.on("data", this.handleClientStdout);
+        this.process.stdout!.on("data", data => {
+            for (const c of data) {
+                buffered += c;
+
+                if (c === "\n") {
+                    this.handleClientStdout(buffered.trim());
+                    buffered = "";
+                }
+            }
+        });
         this.process.stdout!.on("close", () => this.handleDisconnect());
 
         this.process.stderr!.setEncoding("utf-8");
@@ -73,6 +93,11 @@ class SessionRunner {
     public async handleEmojiSelection(emojiId: string, userId: string) {
         if (emojiId === GROUPING_TOGGLE_EMOJI.split(":")[1]) {
             await this.toggleImpostorGrouping(userId);
+            return;
+        }
+
+        if (emojiId === LEAVE_EMOJI.split(":")[1]) {
+            await this.leaveLobby(userId);
             return;
         }
 
@@ -105,6 +130,24 @@ class SessionRunner {
     }
 
     /**
+     * @returns whether the specified clientid is an impostor
+     */
+    public isImpostor(clientId: string): boolean {
+        return this.playerData.some(
+            x => "" + x.clientId === clientId && (x.statusBitField & PlayerDataFlags.IMPOSTOR) !== 0
+        );
+    }
+
+    /**
+     * Handles the usage of the leave react by any user.
+     */
+    private async leaveLobby(userId: string) {
+        if (!this.isConnected || userId !== this.session.creator) return;
+
+        this.process.kill("SIGINT"); // will trigger a disconnect
+    }
+
+    /**
      * Handles the usage of the toggle impostor grouping react by any user.
      */
     private async toggleImpostorGrouping(userId: string) {
@@ -115,6 +158,29 @@ class SessionRunner {
         this.session.groupImpostors = !this.session.groupImpostors;
         await orm.em.persistAndFlush(this.session);
         await this.updateMessage();
+
+        // Create the impostor channel if needed.
+        if (this.session.groupImpostors) {
+            await this.session.channels.init();
+
+            if (this.session.channels.getItems().some(x => x.type === SessionChannelType.IMPOSTORS)) return;
+            const categoryChannel = this.session.channels.getItems().find(x => x.type === SessionChannelType.CATEGORY)!;
+
+            const impostorChannel = await this.bot.createChannel(this.session.guild, "Impostors", 2, {
+                parentID: categoryChannel.channelId,
+                permissionOverwrites: [
+                    {
+                        type: "role",
+                        id: this.session.guild,
+                        deny: eris.Constants.Permissions.readMessages,
+                        allow: 0,
+                    },
+                ],
+            });
+            this.session.channels.add(new SessionChannel(impostorChannel.id, SessionChannelType.IMPOSTORS));
+
+            await orm.em.persistAndFlush(this.session);
+        }
     }
 
     /**
@@ -188,6 +254,7 @@ class SessionRunner {
         this.session.channels.add(new SessionChannel(mutedChannel.id, SessionChannelType.SILENCE));
 
         this.isConnected = true;
+        await orm.em.persistAndFlush(this.session);
         await Promise.all([this.setStateTo(SessionState.LOBBY), addMessageReactions(this.bot, this.session)]);
     }
 
@@ -225,7 +292,13 @@ class SessionRunner {
 
         this.playerData = newData;
         if (shouldUpdateMessage && this.isConnected) {
-            await this.updateMessage();
+            await this.debouncedUpdateMessage();
+        }
+
+        // if we're in lobby but everyone has tasks now, we've started
+        if (this.session.state === SessionState.LOBBY && !this.playerData.some(x => !x.tasks.length)) {
+            await this.setStateTo(SessionState.PLAYING);
+            await movePlayersToSilenceChannel(this.bot, this.session);
         }
     }
 
@@ -235,6 +308,12 @@ class SessionRunner {
     private async updateMessage() {
         await updateMessage(this.bot, this.session, this.playerData);
     }
+
+    /**
+     * Version of {@link updateMessage} that will debounce to ensure that
+     * updates are not pushed too frequently.
+     */
+    private debouncedUpdateMessage = debounce(() => this.updateMessage(), 200);
 
     /**
      * Mutes the specified player in the talking channel because they died,
@@ -265,6 +344,7 @@ class SessionRunner {
      */
     private handleClientStdout = async (msg: string) => {
         msg = msg.trim();
+        if (!msg.length) return;
         const { type, ...rest } = JSON.parse(msg);
 
         if (type === "connect") {
@@ -283,6 +363,11 @@ class SessionRunner {
         }
 
         if (type === "talkingEnd") {
+            if (this.session.state === SessionState.LOBBY) {
+                // Don't transition until we have all the impostor information.
+                return;
+            }
+
             await this.setStateTo(SessionState.PLAYING);
             await movePlayersToSilenceChannel(this.bot, this.session);
         }

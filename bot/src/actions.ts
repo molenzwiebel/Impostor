@@ -5,6 +5,7 @@ import {
     GROUPING_DISABLED_EMOJI,
     GROUPING_ENABLED_EMOJI,
     GROUPING_TOGGLE_EMOJI,
+    LEAVE_EMOJI,
     LobbyRegion,
     SessionState,
 } from "./constants";
@@ -16,7 +17,7 @@ import SessionChannel, {
     SILENCE_CHANNELS,
 } from "./database/session-channel";
 import { getMembersInChannel, isMemberAdmin } from "./listeners";
-import { PlayerData, PlayerDataFlags } from "./session-runner";
+import { getRunnerForSession, PlayerData, PlayerDataFlags } from "./session-runner";
 
 const LOADING = 0x36393f;
 const INFO = 0x0a96de;
@@ -114,6 +115,19 @@ export async function movePlayersToTalkingChannel(bot: eris.Client, session: Amo
  * among us session to the relevant silence channel.
  */
 export async function movePlayersToSilenceChannel(bot: eris.Client, session: AmongUsSession) {
+    if (session.groupImpostors) {
+        await movePlayersToSilenceChannelGrouped(bot, session);
+    } else {
+        await movePlayersToSilenceChannelUngrouped(bot, session);
+    }
+}
+
+/**
+ * Moves all players currently in the talking channel to a common
+ * silence channel, except for any admins in the call, which get their
+ * own channel.
+ */
+export async function movePlayersToSilenceChannelUngrouped(bot: eris.Client, session: AmongUsSession) {
     await session.channels.init();
 
     const categoryChannel = session.channels.getItems().find(x => x.type === SessionChannelType.CATEGORY)!;
@@ -140,10 +154,15 @@ export async function movePlayersToSilenceChannel(bot: eris.Client, session: Amo
         }
 
         // We need to create an admin channel for this user.
-        await bot.createMessage(
-            session.channel,
-            `<@!${adminId}>, since you're an administrator I won't be able to mute you. Instead, you're getting your own channel.`
-        );
+        try {
+            bot.getDMChannel(adminId).then(channel =>
+                channel.createMessage(
+                    `Hey there <@!${adminId}>! Since you're an administrator, I can't mute you through channel permissions. As such, I've created a special Muted channel just for you!`
+                )
+            );
+        } catch (e) {
+            // ignore
+        }
 
         const adminChannel = await bot.createChannel(session.guild, "Muted (Admin)", 2, {
             parentID: categoryChannel.channelId,
@@ -163,6 +182,8 @@ export async function movePlayersToSilenceChannel(bot: eris.Client, session: Amo
         });
     }
 
+    await orm.em.persistAndFlush(session);
+
     // Move the normal players.
     await Promise.all(
         normalPlayersInTalkingChannel.map(id =>
@@ -171,6 +192,75 @@ export async function movePlayersToSilenceChannel(bot: eris.Client, session: Amo
             })
         )
     );
+}
+
+/**
+ * Moves all players currently in the talking channel to their own silence
+ * channel, except the players that
+ */
+export async function movePlayersToSilenceChannelGrouped(bot: eris.Client, session: AmongUsSession) {
+    await session.channels.init();
+    await session.links.init();
+
+    const runner = getRunnerForSession(session);
+    if (!runner) return;
+
+    const categoryChannel = session.channels.getItems().find(x => x.type === SessionChannelType.CATEGORY)!;
+    const talkingChannel = session.channels.getItems().find(x => x.type === SessionChannelType.TALKING)!;
+    const impostorChannel = session.channels.getItems().find(x => x.type === SessionChannelType.IMPOSTORS)!;
+    const impostorSnowflakes = session.links
+        .getItems()
+        .filter(x => runner.isImpostor(x.clientId))
+        .map(x => x.snowflake);
+
+    const playersInTalkingChannel = getMembersInChannel(talkingChannel.channelId);
+    const impostorsInTalkingChannel = playersInTalkingChannel.filter(x => impostorSnowflakes.includes(x));
+    const normalPlayersInTalkingChannel = playersInTalkingChannel.filter(x => !impostorSnowflakes.includes(x));
+
+    // Move impostors to the impostor channel.
+    for (const impostorId of impostorsInTalkingChannel) {
+        await bot.editGuildMember(session.guild, impostorId, {
+            channelID: impostorChannel.channelId,
+        });
+    }
+
+    // Move normal players to empty channels, or create if there are not enough.
+    const emptySilenceChannels = session.channels
+        .getItems()
+        .filter(
+            x => x.type === SessionChannelType.SINGLE_PLAYER_SILENCE && getMembersInChannel(x.channelId).length === 0
+        );
+
+    for (const user of normalPlayersInTalkingChannel) {
+        const appropriateChannel = emptySilenceChannels.pop();
+
+        if (appropriateChannel) {
+            await bot.editGuildMember(session.guild, user, {
+                channelID: appropriateChannel.channelId,
+            });
+            continue;
+        }
+
+        // We need to create a silence channel for this user.
+        const silenceChannel = await bot.createChannel(session.guild, "Muted", 2, {
+            parentID: categoryChannel.channelId,
+            permissionOverwrites: [
+                {
+                    type: "role",
+                    id: session.guild,
+                    deny: eris.Constants.Permissions.voiceSpeak | eris.Constants.Permissions.readMessages,
+                    allow: 0,
+                },
+            ],
+        });
+        session.channels.add(new SessionChannel(silenceChannel.id, SessionChannelType.SINGLE_PLAYER_SILENCE));
+
+        await bot.editGuildMember(session.guild, user, {
+            channelID: silenceChannel.id,
+        });
+    }
+
+    await orm.em.persistAndFlush(session);
 }
 
 /**
@@ -258,6 +348,7 @@ export async function updateMessageWithSessionStale(bot: eris.Client, session: A
  */
 export async function addMessageReactions(bot: eris.Client, session: AmongUsSession) {
     await bot.addMessageReaction(session.channel, session.message, GROUPING_TOGGLE_EMOJI);
+    await bot.addMessageReaction(session.channel, session.message, LEAVE_EMOJI);
 
     for (const emote of Object.values(COLOR_EMOTES)) {
         await bot.addMessageReaction(session.channel, session.message, emote);
@@ -280,9 +371,9 @@ export async function updateMessage(bot: eris.Client, session: AmongUsSession, p
 }
 
 function formatPlayerText(session: AmongUsSession, playerData: PlayerData[]) {
-    let playerText = "**Current Players**:\n";
+    let playerText = "";
     for (const p of playerData) {
-        const emoteMap = (p.statusBitField & PlayerDataFlags.DEAD) !== 0 ? COLOR_EMOTES : DEAD_COLOR_EMOTES;
+        const emoteMap = (p.statusBitField & PlayerDataFlags.DEAD) === 0 ? COLOR_EMOTES : DEAD_COLOR_EMOTES;
         playerText += `<:${emoteMap[p.color]}> ${p.name}`;
         const link = session.links.getItems().find(x => x.clientId === "" + p.clientId);
         if (link) {
@@ -325,7 +416,8 @@ async function updateMessageToPlaying(bot: eris.Client, session: AmongUsSession,
             footer: {
                 icon_url:
                     "https://cdn.discordapp.com/icons/579772930607808537/2d2607a672f2529206edd929ef55173e.png?size=128",
-                text: "Reminder: the bot takes up a player spot!",
+                text:
+                    "Reminder: the bot takes up a player spot! Found that last player? Use the X to have the bot leave.",
             },
         },
     });
@@ -364,7 +456,8 @@ async function updateMessageToLobby(bot: eris.Client, session: AmongUsSession, p
             footer: {
                 icon_url:
                     "https://cdn.discordapp.com/icons/579772930607808537/2d2607a672f2529206edd929ef55173e.png?size=128",
-                text: "Reminder: the bot takes up a player spot!",
+                text:
+                    "Reminder: the bot takes up a player spot! Found that last player? Use the X to have the bot leave.",
             },
         },
     });

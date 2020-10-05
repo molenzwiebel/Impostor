@@ -1,6 +1,6 @@
 import eris, { Emoji, PossiblyUncachedMessage } from "eris";
 import { createEmptyNewSession, movePlayersToSilenceChannel, movePlayersToTalkingChannel } from "./actions";
-import { COLOR_EMOTE_IDS, GROUPING_TOGGLE_EMOJI, LobbyRegion, SessionState } from "./constants";
+import { COLOR_EMOTE_IDS, GROUPING_TOGGLE_EMOJI, LEAVE_EMOJI, LobbyRegion, SessionState } from "./constants";
 import { orm } from "./database";
 import AmongUsSession from "./database/among-us-session";
 import SessionChannel, { SILENCE_CHANNELS, TALKING_CHANNELS } from "./database/session-channel";
@@ -106,7 +106,13 @@ export async function onReactionAdded(
     emoji: Emoji,
     userID: string
 ) {
-    if (!COLOR_EMOTE_IDS.includes(emoji.id) && GROUPING_TOGGLE_EMOJI.split(":")[1] != emoji.id) return;
+    if (
+        !COLOR_EMOTE_IDS.includes(emoji.id) &&
+        GROUPING_TOGGLE_EMOJI.split(":")[1] !== emoji.id &&
+        LEAVE_EMOJI.split(":")[1] !== emoji.id
+    )
+        return;
+
     if (userID === bot.user.id) return;
 
     const session = await orm.em.findOne(AmongUsSession, {

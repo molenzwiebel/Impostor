@@ -60,3 +60,4 @@ Object.entries(COLOR_EMOTES).forEach(x => (EMOTE_IDS_TO_COLOR[x[1].split(":")[1]
 export const GROUPING_DISABLED_EMOJI = "<:impostor_grouping_disabled:761985590123954176>";
 export const GROUPING_ENABLED_EMOJI = "<:impostor_grouping_enabled:761985589784215565>";
 export const GROUPING_TOGGLE_EMOJI = "toggle_impostor_grouping:761987527493943326";
+export const LEAVE_EMOJI = "leave_lobby:762751494495666207";

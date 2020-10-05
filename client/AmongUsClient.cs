@@ -191,9 +191,16 @@ namespace client
         /// </summary>
         private void OnMessageReceived(DataReceivedEventArgs args)
         {
-            foreach (var message in args.Message.Messages())
+            try
             {
-                HandleMessage(message);
+                foreach (var message in args.Message.Messages())
+                {
+                    HandleMessage(message);
+                }
+            }
+            finally
+            {
+                args.Message.Recycle();
             }
         }
 
@@ -465,11 +472,18 @@ namespace client
             Action<DataReceivedEventArgs> onDataReceived = null;
             onDataReceived = args =>
             {
-                var msg = args.Message.ReadMessage();
-                if (msg.Tag == (byte) MMTags.ReselectServer) return; // not interested
+                try
+                {
+                    var msg = args.Message.ReadMessage();
+                    if (msg.Tag == (byte) MMTags.ReselectServer) return; // not interested
 
-                firstMessageTask.TrySetResult(msg);
-                connection.DataReceived -= onDataReceived;
+                    firstMessageTask.TrySetResult(msg);
+                    connection.DataReceived -= onDataReceived;
+                }
+                finally
+                {
+                    args.Message.Recycle();
+                }
             };
             connection.DataReceived += onDataReceived;
 

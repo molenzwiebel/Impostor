@@ -17,8 +17,11 @@ namespace client
         public static void SendReliableMessage(this UdpClientConnection connection, Action<MessageWriter> write)
         {
             var writer = MessageWriter.Get(SendOption.Reliable);
-            write(writer);
-            try { connection.Send(writer); } catch { /* Ignored */ }
+            try
+            {
+                write(writer);
+                connection.Send(writer);
+            } catch { /* Ignored */ }
             writer.Recycle();
         }
 

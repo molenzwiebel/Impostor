@@ -1,4 +1,5 @@
 ﻿using System;
+using System.IO;
 using System.Net;
 using System.Threading.Tasks;
 using Newtonsoft.Json;
@@ -32,6 +33,13 @@ namespace client
                 return;
             }
 
+            // Trap ctrlc (SIGINT) to disconnect before terminating.
+            Console.CancelKeyPress += (sender, ev) =>
+            {
+                ev.Cancel = true; // cancel direct shutdown, so we can disconnect and then kill ourselves
+                client.DisconnectAndExit();
+            };
+
             // Idle endlessly.
             while (true)
             {
@@ -41,7 +49,7 @@ namespace client
 
         private static void WriteMessage(object obj)
         {
-            Console.WriteLine(JsonConvert.SerializeObject(obj));
+            Console.Out.WriteLine(JsonConvert.SerializeObject(obj));
             Console.Out.Flush();
         }
     }

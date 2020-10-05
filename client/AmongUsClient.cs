@@ -119,6 +119,15 @@ namespace client
         }
 
         /// <summary>
+        /// When invoked, does a final termination of the client. This will emit the
+        /// disconnect event.
+        /// </summary>
+        public void DisconnectAndExit()
+        {
+            _connection?.Disconnect("Bye bye!");
+        }
+
+        /// <summary>
         /// Writes a join game request to the specified message writer.
         /// </summary>
         private void JoinGame(MessageWriter writer)
@@ -271,6 +280,16 @@ namespace client
                 _playerData.Find(x => x.id == victimPlayerId).statusBitField |= 4; // dead
                 OnPlayerDataUpdate?.Invoke(_playerData);
             }
+            else if (action == RPCCalls.VotingComplete)
+            {
+                reader.ReadBytesAndSize(); // voting data
+                var victim = reader.ReadByte();
+                if (victim != 0xFF)
+                {
+                    _playerData.Find(x => x.id == victim).statusBitField |= 4; // dead
+                    OnPlayerDataUpdate?.Invoke(_playerData);
+                }
+            }
         }
 
         /// <summary>
@@ -373,6 +392,7 @@ namespace client
         /// </summary>
         private void HandleEndGame(MessageReader message)
         {
+            _playerData.ForEach(x => x.tasks.Clear()); // nobody has tasks any more
             OnPlayerDataUpdate?.Invoke(_playerData);
             OnGameEnd?.Invoke();
 
@@ -411,7 +431,7 @@ namespace client
         private async Task DisconnectAndReconnect()
         {
             _connection.RemoveDisconnectListeners();
-            _connection.Disconnect("I don't want to be the host");
+            _connection.Disconnect("Bye bye!");
 
             try
             {

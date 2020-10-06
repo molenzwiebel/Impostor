@@ -1,12 +1,19 @@
 import eris, { Emoji, PossiblyUncachedMessage } from "eris";
 import { createEmptyNewSession, movePlayersToSilenceChannel, movePlayersToTalkingChannel } from "./actions";
-import { COLOR_EMOTE_IDS, GROUPING_TOGGLE_EMOJI, LEAVE_EMOJI, LobbyRegion, SessionState } from "./constants";
+import {
+    BOT_INVITE_LINK,
+    COLOR_EMOTE_IDS,
+    GROUPING_TOGGLE_EMOJI,
+    LEAVE_EMOJI,
+    LobbyRegion,
+    SessionState,
+} from "./constants";
 import { orm } from "./database";
 import AmongUsSession from "./database/among-us-session";
 import SessionChannel, { SILENCE_CHANNELS, TALKING_CHANNELS } from "./database/session-channel";
 import startSession, { getRunnerForSession } from "./session-runner";
 
-const COMMAND_PREFIX = "!amongus ";
+const COMMAND_PREFIX = "!amongus";
 const VOICE_CHANNEL_USERS = new Map<string, string[]>();
 const ADMIN_USERS = new Set<string>();
 
@@ -140,6 +147,14 @@ export async function onMessageCreated(bot: eris.Client, msg: eris.Message) {
     if (!msg.content.startsWith(COMMAND_PREFIX) || msg.author.bot) return;
     if (!(msg.channel instanceof eris.TextChannel)) return;
 
+    if (msg.content === COMMAND_PREFIX || msg.content === COMMAND_PREFIX + " help") {
+        return await sendHelp(bot, msg);
+    }
+
+    if (msg.content === COMMAND_PREFIX + " invite") {
+        return await sendInvite(bot, msg);
+    }
+
     try {
         const { region, code } = parseCommandInvocation(msg.content);
 
@@ -151,12 +166,67 @@ export async function onMessageCreated(bot: eris.Client, msg: eris.Message) {
 }
 
 /**
+ * Sends a message with help and other information as a reply to the specified message.
+ */
+async function sendHelp(bot: eris.Client, msg: eris.Message) {
+    await msg.channel.createMessage({
+        embed: {
+            color: 0x0a96de,
+            title: "📖 Impostor - Help",
+            thumbnail: { url: bot.user.avatarURL.replace("jpg", "png") },
+            description: `Impostor is a Discord bot for Among Us that manages voice channels for you! Automatically muting everyone when gameplay resumes, ensuring dead players can't talk, and even allowing multiple impostors to talk to each other has never been so easy. No client installs needed!`,
+            fields: [
+                {
+                    name: "How does it work?",
+                    value:
+                        `First, create a lobby in Among Us as usual. After creating one, use \`!amongus [region] [invite code]\` (for example: \`!amongus na ABCDEF\`) to set up the bot. The bot will create a new set of voice channels specifically for your lobby. Simply join the Discussion channel, and the bot will do the rest!` +
+                        `\n\nWant to be automatically muted when you die? You can react to the bot message with the color of your crewmate to link your Discord account with your crewmate. Once they die, you will automatically be muted.`,
+                },
+                {
+                    name: "How does the bot know when to mute?",
+                    value: `The bot will join your lobby as a fake Among Us player, then despawn itself. This will make sure that the bot does not become a player when the game starts, but still allows it to see everything that's going on! Unfortunately, the bot will still take up a spot in your lobby, so you will only be able to play with 9 players max.`,
+                },
+                {
+                    name: "Why are you moving channels instead of server mutes?",
+                    value:
+                        "Server mutes are notoriously hard to get right. If players leave voice channels halfway through a game, they may end up staying stuck server-muted when they rejoin a voice channel days or even weeks later. Using various different voice channels resolves this issue.",
+                },
+                {
+                    name: "Help! I'm having an issue!",
+                    value:
+                        "If Impostor is not working, join the [Discord server](https://discord.gg/fQk7CHx) and let me know!",
+                },
+                {
+                    name: "I want to add Impostor to my own server!",
+                    value: `Sure thing! Click [here](${BOT_INVITE_LINK}) to invite Impostor.`,
+                },
+            ],
+        },
+    });
+}
+
+/**
+ * Sends a message that contains information about how to invite Impostor to
+ * a new Discord server.
+ */
+async function sendInvite(bot: eris.Client, msg: eris.Message) {
+    await msg.channel.createMessage({
+        embed: {
+            color: 0x0a96de,
+            title: "🧑‍🤝‍🧑 Impostor - Invite",
+            thumbnail: { url: bot.user.avatarURL.replace("jpg", "png") },
+            description: `Want to add Impostor to your own Discord server? Sure thing! Simply click [here](${BOT_INVITE_LINK}) to add the bot.\n\nHaving issues? Join the [support Discord server](https://discord.gg/fQk7CHx) and let me know!`,
+        },
+    });
+}
+
+/**
  * Attempts to parse the region from the specified command invocation,
  * including the command prefix. Returns the parsed region and the code,
  * or throws an error if it could not be parsed.
  */
 function parseCommandInvocation(msg: string): { region: LobbyRegion; code: string } {
-    msg = msg.slice(COMMAND_PREFIX.length);
+    msg = msg.slice(COMMAND_PREFIX.length + 1);
 
     let region: LobbyRegion | null = null;
 
@@ -194,13 +264,7 @@ function parseCommandInvocation(msg: string): { region: LobbyRegion; code: strin
     }
 
     if (!region) {
-        throw (
-            "Could not determine the region of the lobby. Try doing `" +
-            COMMAND_PREFIX +
-            "na ABCDEF` or `" +
-            COMMAND_PREFIX +
-            "europe GHIJKL`."
-        );
+        throw `Could not determine the region of the lobby. Try doing \`${COMMAND_PREFIX} na ABCDEF\` or \`${COMMAND_PREFIX} europe GHIJKL\`.`;
     }
 
     return {

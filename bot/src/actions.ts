@@ -370,15 +370,21 @@ export async function updateMessage(bot: eris.Client, session: AmongUsSession, p
     }
 }
 
+/**
+ * Formats the list of players currently in the specified session, using
+ * the game data from the current session.
+ */
 function formatPlayerText(session: AmongUsSession, playerData: PlayerData[]) {
     let playerText = "";
     for (const p of playerData) {
         const emoteMap = (p.statusBitField & PlayerDataFlags.DEAD) === 0 ? COLOR_EMOTES : DEAD_COLOR_EMOTES;
         playerText += `<:${emoteMap[p.color]}> ${p.name}`;
-        const link = session.links.getItems().find(x => x.clientId === "" + p.clientId);
-        if (link) {
-            playerText += ` (<@!${link.snowflake}>)`;
+
+        const links = session.links.getItems().filter(x => x.clientId === "" + p.clientId);
+        if (links.length) {
+            playerText += ` (` + links.map(x => `<@!${x.snowflake}>`).join(", ") + `)`;
         }
+
         playerText += "\n";
     }
     return playerText.trim();
@@ -414,8 +420,7 @@ async function updateMessageToPlaying(bot: eris.Client, session: AmongUsSession,
                 },
             ],
             footer: {
-                icon_url:
-                    "https://cdn.discordapp.com/icons/579772930607808537/2d2607a672f2529206edd929ef55173e.png?size=128",
+                icon_url: bot.user.avatarURL.replace("jpg", "png"),
                 text:
                     "Reminder: the bot takes up a player spot! Found that last player? Use the X to have the bot leave.",
             },
@@ -454,8 +459,7 @@ async function updateMessageToLobby(bot: eris.Client, session: AmongUsSession, p
                 },
             ],
             footer: {
-                icon_url:
-                    "https://cdn.discordapp.com/icons/579772930607808537/2d2607a672f2529206edd929ef55173e.png?size=128",
+                icon_url: bot.user.avatarURL.replace("jpg", "png"),
                 text:
                     "Reminder: the bot takes up a player spot! Found that last player? Use the X to have the bot leave.",
             },

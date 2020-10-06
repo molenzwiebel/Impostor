@@ -109,17 +109,18 @@ class SessionRunner {
         const relevantPlayer = this.playerData.find(x => x.color === selectedColor);
         if (!relevantPlayer) return;
 
-        // Check if nobody else has chosen that color.
-        const existingEntry = this.session.links.getItems().find(x => x.clientId === "" + relevantPlayer.clientId);
-        if (existingEntry) return;
-
         // Check if they had a different color selected, and remove if that was the case.
         const oldMatching = this.session.links.getItems().find(x => x.snowflake === userId);
         if (oldMatching) {
             await this.session.links.remove(oldMatching);
         }
 
-        await this.session.links.add(new PlayerLink("" + relevantPlayer.clientId, userId));
+        // if the old matching had the same client id, this is a re-react to remove the link.
+        // if they don't match, add the link
+        if (!oldMatching || oldMatching.clientId !== "" + relevantPlayer.clientId) {
+            await this.session.links.add(new PlayerLink("" + relevantPlayer.clientId, userId));
+        }
+
         await orm.em.flush();
         await this.updateMessage();
 
@@ -323,11 +324,11 @@ class SessionRunner {
         await this.session.links.init();
         await this.session.channels.init();
 
-        const link = this.session.links.getItems().find(x => x.clientId === "" + clientId);
-        if (!link) return;
-
-        this.mutedPlayers.add(link.snowflake);
-        await mutePlayerInChannels(this.bot, this.session, link.snowflake);
+        const links = this.session.links.getItems().filter(x => x.clientId === "" + clientId);
+        for (const link of links) {
+            this.mutedPlayers.add(link.snowflake);
+            await mutePlayerInChannels(this.bot, this.session, link.snowflake);
+        }
     }
 
     /**

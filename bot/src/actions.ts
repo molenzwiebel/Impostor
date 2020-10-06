@@ -35,6 +35,8 @@ export async function createEmptyNewSession(
     region: LobbyRegion,
     code: string
 ): Promise<AmongUsSession> {
+    console.log(`[+] Creating new AU session for ${code} on ${region}`);
+
     const message = await msg.channel.createMessage({
         embed: {
             color: LOADING,

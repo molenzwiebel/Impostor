@@ -364,8 +364,8 @@ class SessionRunner {
 
         if (type === "gameEnd") {
             await this.setStateTo(SessionState.LOBBY);
-            await movePlayersToTalkingChannel(this.bot, this.session);
             await this.unmutePlayers();
+            await movePlayersToTalkingChannel(this.bot, this.session);
         }
 
         if (type === "talkingStart") {

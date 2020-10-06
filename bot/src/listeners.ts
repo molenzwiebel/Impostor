@@ -147,6 +147,8 @@ export async function onMessageCreated(bot: eris.Client, msg: eris.Message) {
     if (!msg.content.startsWith(COMMAND_PREFIX) || msg.author.bot) return;
     if (!(msg.channel instanceof eris.TextChannel)) return;
 
+    console.log(`[+] Command: ${msg.content}`);
+
     if (msg.content === COMMAND_PREFIX || msg.content === COMMAND_PREFIX + " help") {
         return await sendHelp(bot, msg);
     }

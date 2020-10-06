@@ -25,7 +25,7 @@ import AmongUsSession from "./database/among-us-session";
 import PlayerLink from "./database/player-link";
 import SessionChannel, { SessionChannelType } from "./database/session-channel";
 
-const WORKING_DIR = path.resolve(path.join(__dirname, "../../client/bin/Debug/netcoreapp3.1"));
+const WORKING_DIR = path.resolve(process.env.AU_CLIENT_DIR!);
 const CLIENT = path.join(WORKING_DIR, "client.exe");
 
 /**
@@ -66,6 +66,16 @@ class SessionRunner {
         this.process = child_process.spawn(CLIENT, [SERVER_IPS[this.session.region], this.session.lobbyCode], {
             cwd: WORKING_DIR,
         });
+
+        // Kill the process if it doesn't do anything after 30 seconds.
+        setTimeout(() => {
+            if (this.isConnected) return;
+
+            this.process.kill("SIGTERM");
+            this.handleError(
+                "It took too long to connect to the Among Us services. This is likely due to server load issues. Try again in a bit."
+            );
+        }, 30 * 1000);
 
         let buffered = "";
 

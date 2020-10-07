@@ -34,5 +34,9 @@ const intents = Eris.Constants.Intents;
     bot.on("voiceChannelLeave", onVoiceLeave);
     bot.on("voiceChannelSwitch", onVoiceChange);
 
+    bot.on("error", e => {
+        console.log(`[-] Got Discord error: '${e}'. Attempting to reconnect...`);
+    });
+
     console.log("[+] Connected to Discord as " + bot.user.username);
 })();

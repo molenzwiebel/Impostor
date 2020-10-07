@@ -77,12 +77,18 @@ export async function cleanUpOldSessions(bot: eris.Client) {
  * Similar to cleanUpOldSessions, but for a single old session.
  */
 async function cleanUpSession(bot: eris.Client, session: AmongUsSession) {
-    await session.channels.init();
-    for (const channel of session.channels) {
-        await bot.deleteChannel(channel.channelId, "Among Us: Session is over.");
+    try {
+        await session.channels.init();
+
+        for (const channel of session.channels) {
+            await bot.deleteChannel(channel.channelId, "Among Us: Session is over.").catch(() => {});
+        }
+
+        await updateMessageWithSessionStale(bot, session);
+    } catch {
+        // ignored
     }
 
-    await updateMessageWithSessionStale(bot, session);
     await orm.em.removeAndFlush(session);
 }
 
@@ -333,15 +339,17 @@ export async function updateMessageWithSessionOver(bot: eris.Client, session: Am
  * game and was not able to reconnect.
  */
 export async function updateMessageWithSessionStale(bot: eris.Client, session: AmongUsSession) {
-    await bot.editMessage(session.channel, session.message, {
-        embed: {
-            color: ERROR,
-            title: `🎲 Among Us - Session Over`,
-            description: `${session.user} was hosting a game of [Among Us](http://www.innersloth.com/gameAmongUs.php) here, but an unexpected error happened. Try again in a bit?`,
-        },
-    });
+    await bot
+        .editMessage(session.channel, session.message, {
+            embed: {
+                color: ERROR,
+                title: `🎲 Among Us - Session Over`,
+                description: `${session.user} was hosting a game of [Among Us](http://www.innersloth.com/gameAmongUs.php) here, but an unexpected error happened. Try again in a bit?`,
+            },
+        })
+        .catch(() => {});
 
-    await bot.removeMessageReactions(session.channel, session.message);
+    await bot.removeMessageReactions(session.channel, session.message).catch(() => {});
 }
 
 /**

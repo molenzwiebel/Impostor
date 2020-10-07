@@ -26,7 +26,7 @@ import PlayerLink from "./database/player-link";
 import SessionChannel, { SessionChannelType } from "./database/session-channel";
 
 const WORKING_DIR = path.resolve(process.env.AU_CLIENT_DIR!);
-const CLIENT = path.join(WORKING_DIR, "client.exe");
+const CLIENT = path.join(WORKING_DIR, process.platform === "win32" ? "client.exe" : "client");
 
 /**
  * Incomplete definition of the player data outputted by the client.

@@ -53,7 +53,7 @@ export const DEAD_COLOR_EMOTES: { [key: number]: string } = {
 };
 
 export const BOT_INVITE_LINK =
-    "https://discord.com/api/oauth2/authorize?client_id=755520374510321745&permissions=21261392&scope=bot";
+    "https://discord.com/api/oauth2/authorize?client_id=755520374510321745&permissions=21261521&scope=bot";
 
 export const COLOR_EMOTE_IDS = Object.values(COLOR_EMOTES).map(x => x.split(":")[1]);
 

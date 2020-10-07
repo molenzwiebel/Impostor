@@ -412,7 +412,7 @@ async function updateMessageToPlaying(bot: eris.Client, session: AmongUsSession,
             fields: [
                 {
                     name: "Current Players",
-                    value: formatPlayerText(session, playerData),
+                    value: formatPlayerText(session, playerData) || "_None_",
                 },
                 {
                     name: session.groupImpostors
@@ -451,7 +451,7 @@ async function updateMessageToLobby(bot: eris.Client, session: AmongUsSession, p
             fields: [
                 {
                     name: "Current Players",
-                    value: formatPlayerText(session, playerData),
+                    value: formatPlayerText(session, playerData) || "_None_",
                 },
                 {
                     name: session.groupImpostors

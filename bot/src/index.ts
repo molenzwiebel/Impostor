@@ -21,6 +21,11 @@ const intents = Eris.Constants.Intents;
     await bot.connect();
     await new Promise(r => bot.once("ready", r));
 
+    await bot.editStatus("online", {
+        name: "!amongus help",
+        type: 0,
+    });
+
     await cleanUpOldSessions(bot);
 
     bot.on("messageCreate", onMessageCreated.bind(null, bot));

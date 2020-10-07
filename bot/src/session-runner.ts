@@ -55,6 +55,7 @@ class SessionRunner {
     private deadPlayers = new Set<number>(); // clientIds of dead players
     private mutedPlayers = new Set<string>(); // snowflakes of muted players
     private isConnected = false;
+    private isDestroyed = false;
 
     constructor(private bot: eris.Client, private session: AmongUsSession) {}
 
@@ -69,7 +70,7 @@ class SessionRunner {
 
         // Kill the process if it doesn't do anything after 30 seconds.
         setTimeout(() => {
-            if (this.isConnected) return;
+            if (this.isConnected || this.isDestroyed) return;
 
             this.process.kill("SIGTERM");
             this.handleError(
@@ -101,6 +102,8 @@ class SessionRunner {
      * emoji id. It is already verified that emojiId is a valid color reaction.
      */
     public async handleEmojiSelection(emojiId: string, userId: string) {
+        if (this.isDestroyed) return;
+
         if (emojiId === GROUPING_TOGGLE_EMOJI.split(":")[1]) {
             await this.toggleImpostorGrouping(userId);
             return;
@@ -170,6 +173,8 @@ class SessionRunner {
         await orm.em.persistAndFlush(this.session);
         await this.updateMessage();
 
+        console.log(`[+] Set impostor grouping to ${this.session.groupImpostors} for session ${this.session.id}`);
+
         // Create the impostor channel if needed.
         if (this.session.groupImpostors) {
             await this.session.channels.init();
@@ -202,15 +207,17 @@ class SessionRunner {
         if (!this.isConnected) return;
 
         this.isConnected = false;
+        console.log(`[+] Session ${this.session.id} disconnected from Among Us`);
 
         await this.session.channels.init();
         for (const channel of this.session.channels) {
-            await this.bot.deleteChannel(channel.channelId, "Among Us: Session is over.");
+            await this.bot.deleteChannel(channel.channelId, "Among Us: Session is over.").catch(() => {});
         }
 
         await updateMessageWithSessionOver(this.bot, this.session);
         await orm.em.removeAndFlush(this.session);
         sessions.delete(this.session.id);
+        this.isDestroyed = true;
     }
 
     /**
@@ -219,8 +226,13 @@ class SessionRunner {
      * yet.
      */
     private async handleError(error: string) {
+        if (this.isDestroyed) return;
+
+        console.log(`[+] Session ${this.session.id} encountered an error: '${error}'`);
+
         await updateMessageWithError(this.bot, this.session, error);
         await orm.em.removeAndFlush(this.session);
+        this.isDestroyed = true;
         sessions.delete(this.session.id);
     }
 
@@ -229,7 +241,9 @@ class SessionRunner {
      * current session. Creates the relevant voice channels and updates the state.
      */
     private async handleConnect() {
-        if (this.isConnected) return;
+        if (this.isConnected || this.isDestroyed) return;
+
+        console.log(`[+] Session ${this.session.id} connected to lobby.`);
 
         const category = await this.bot.createChannel(
             this.session.guild,
@@ -274,6 +288,8 @@ class SessionRunner {
      * state, then ensures that the chat message is updated to reflect this state.
      */
     private async setStateTo(state: SessionState) {
+        if (this.isDestroyed) return;
+
         this.session.state = state;
         await orm.em.flush();
         await this.updateMessage();
@@ -307,7 +323,7 @@ class SessionRunner {
         }
 
         // if we're in lobby but everyone has tasks now, we've started
-        if (this.session.state === SessionState.LOBBY && !this.playerData.some(x => !x.tasks.length)) {
+        if (this.session.state === SessionState.LOBBY && !this.playerData.some(x => !x.tasks || !x.tasks.length)) {
             await this.setStateTo(SessionState.PLAYING);
             await movePlayersToSilenceChannel(this.bot, this.session);
         }
@@ -354,6 +370,8 @@ class SessionRunner {
      * a JSON message and then dispatching the result of that message.
      */
     private handleClientStdout = async (msg: string) => {
+        if (this.isDestroyed) return;
+
         msg = msg.trim();
         if (!msg.length) return;
         const { type, ...rest } = JSON.parse(msg);
@@ -363,17 +381,22 @@ class SessionRunner {
         }
 
         if (type === "gameEnd") {
+            console.log(`[+] Session ${this.session.id}: game ended`);
+
             await this.setStateTo(SessionState.LOBBY);
             await this.unmutePlayers();
             await movePlayersToTalkingChannel(this.bot, this.session);
         }
 
         if (type === "talkingStart") {
+            console.log(`[+] Session ${this.session.id}: talking started`);
             await this.setStateTo(SessionState.DISCUSSING);
             await movePlayersToTalkingChannel(this.bot, this.session);
         }
 
         if (type === "talkingEnd") {
+            console.log(`[+] Session ${this.session.id}: talking ended`);
+
             if (this.session.state === SessionState.LOBBY) {
                 // Don't transition until we have all the impostor information.
                 return;

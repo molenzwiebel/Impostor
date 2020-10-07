@@ -37,6 +37,14 @@ export async function createEmptyNewSession(
 ): Promise<AmongUsSession> {
     console.log(`[+] Creating new AU session for ${code} on ${region}`);
 
+    const existing = await orm.em.findOne(AmongUsSession, {
+        region,
+        lobbyCode: code,
+    });
+    if (existing && getRunnerForSession(existing)) {
+        throw "The lobby " + code + " on " + region + " is already being monitored by Impostor.";
+    }
+
     const message = await msg.channel.createMessage({
         embed: {
             color: LOADING,
@@ -98,9 +106,11 @@ async function cleanUpSession(bot: eris.Client, session: AmongUsSession) {
 async function moveAllPlayers(bot: eris.Client, session: AmongUsSession, idFrom: string, idTo: string) {
     await Promise.all(
         getMembersInChannel(idFrom).map(x =>
-            bot.editGuildMember(session.guild, x, {
-                channelID: idTo,
-            })
+            bot
+                .editGuildMember(session.guild, x, {
+                    channelID: idTo,
+                })
+                .catch(() => {})
         )
     );
 }
@@ -155,9 +165,11 @@ export async function movePlayersToSilenceChannelUngrouped(bot: eris.Client, ses
         const appropriateAdminChannel = emptyAdminChannels.pop();
 
         if (appropriateAdminChannel) {
-            await bot.editGuildMember(session.guild, adminId, {
-                channelID: appropriateAdminChannel.channelId,
-            });
+            await bot
+                .editGuildMember(session.guild, adminId, {
+                    channelID: appropriateAdminChannel.channelId,
+                })
+                .catch(() => {});
             continue;
         }
 
@@ -185,9 +197,11 @@ export async function movePlayersToSilenceChannelUngrouped(bot: eris.Client, ses
         });
         session.channels.add(new SessionChannel(adminChannel.id, SessionChannelType.ADMIN_SILENCE));
 
-        await bot.editGuildMember(session.guild, adminId, {
-            channelID: adminChannel.id,
-        });
+        await bot
+            .editGuildMember(session.guild, adminId, {
+                channelID: adminChannel.id,
+            })
+            .catch(() => {});
     }
 
     await orm.em.persistAndFlush(session);
@@ -195,9 +209,11 @@ export async function movePlayersToSilenceChannelUngrouped(bot: eris.Client, ses
     // Move the normal players.
     await Promise.all(
         normalPlayersInTalkingChannel.map(id =>
-            bot.editGuildMember(session.guild, id, {
-                channelID: silenceChannel.channelId,
-            })
+            bot
+                .editGuildMember(session.guild, id, {
+                    channelID: silenceChannel.channelId,
+                })
+                .catch(() => {})
         )
     );
 }
@@ -227,9 +243,11 @@ export async function movePlayersToSilenceChannelGrouped(bot: eris.Client, sessi
 
     // Move impostors to the impostor channel.
     for (const impostorId of impostorsInTalkingChannel) {
-        await bot.editGuildMember(session.guild, impostorId, {
-            channelID: impostorChannel.channelId,
-        });
+        await bot
+            .editGuildMember(session.guild, impostorId, {
+                channelID: impostorChannel.channelId,
+            })
+            .catch(() => {});
     }
 
     // Move normal players to empty channels, or create if there are not enough.
@@ -243,9 +261,11 @@ export async function movePlayersToSilenceChannelGrouped(bot: eris.Client, sessi
         const appropriateChannel = emptySilenceChannels.pop();
 
         if (appropriateChannel) {
-            await bot.editGuildMember(session.guild, user, {
-                channelID: appropriateChannel.channelId,
-            });
+            await bot
+                .editGuildMember(session.guild, user, {
+                    channelID: appropriateChannel.channelId,
+                })
+                .catch(() => {});
             continue;
         }
 
@@ -263,9 +283,11 @@ export async function movePlayersToSilenceChannelGrouped(bot: eris.Client, sessi
         });
         session.channels.add(new SessionChannel(silenceChannel.id, SessionChannelType.SINGLE_PLAYER_SILENCE));
 
-        await bot.editGuildMember(session.guild, user, {
-            channelID: silenceChannel.id,
-        });
+        await bot
+            .editGuildMember(session.guild, user, {
+                channelID: silenceChannel.id,
+            })
+            .catch(() => {});
     }
 
     await orm.em.persistAndFlush(session);
@@ -278,13 +300,9 @@ export async function mutePlayerInChannels(bot: eris.Client, session: AmongUsSes
     await session.channels.init();
 
     for (const channel of session.channels.getItems().filter(x => MUTE_IF_DEAD_CHANNELS.includes(x.type))) {
-        await bot.editChannelPermission(
-            channel.channelId,
-            snowflake,
-            0,
-            eris.Constants.Permissions.voiceSpeak,
-            "member"
-        );
+        await bot
+            .editChannelPermission(channel.channelId, snowflake, 0, eris.Constants.Permissions.voiceSpeak, "member")
+            .catch(() => {});
     }
 }
 
@@ -295,7 +313,7 @@ export async function unmutePlayerInChannels(bot: eris.Client, session: AmongUsS
     await session.channels.init();
 
     for (const channel of session.channels.getItems().filter(x => MUTE_IF_DEAD_CHANNELS.includes(x.type))) {
-        await bot.deleteChannelPermission(channel.channelId, snowflake);
+        await bot.deleteChannelPermission(channel.channelId, snowflake).catch(() => {});
     }
 }
 
@@ -305,15 +323,17 @@ export async function unmutePlayerInChannels(bot: eris.Client, session: AmongUsS
  * session itself.
  */
 export async function updateMessageWithError(bot: eris.Client, session: AmongUsSession, error: string) {
-    await bot.editMessage(session.channel, session.message, {
-        embed: {
-            color: ERROR,
-            title: `🎲 Among Us - Error`,
-            description: `${error}`,
-        },
-    });
+    await bot
+        .editMessage(session.channel, session.message, {
+            embed: {
+                color: ERROR,
+                title: `🎲 Among Us - Error`,
+                description: `${error}`,
+            },
+        })
+        .catch(() => {});
 
-    await bot.removeMessageReactions(session.channel, session.message);
+    await bot.removeMessageReactions(session.channel, session.message).catch(() => {});
 }
 
 /**
@@ -322,15 +342,17 @@ export async function updateMessageWithError(bot: eris.Client, session: AmongUsS
  * remove the session itself.
  */
 export async function updateMessageWithSessionOver(bot: eris.Client, session: AmongUsSession) {
-    await bot.editMessage(session.channel, session.message, {
-        embed: {
-            color: ERROR,
-            title: `🎲 Among Us - Session Over`,
-            description: `${session.user} was hosting a game of [Among Us](http://www.innersloth.com/gameAmongUs.php) here, but the lobby closed.`,
-        },
-    });
+    await bot
+        .editMessage(session.channel, session.message, {
+            embed: {
+                color: ERROR,
+                title: `🎲 Among Us - Session Over`,
+                description: `${session.user} was hosting a game of [Among Us](http://www.innersloth.com/gameAmongUs.php) here, but the lobby closed.`,
+            },
+        })
+        .catch(() => {});
 
-    await bot.removeMessageReactions(session.channel, session.message);
+    await bot.removeMessageReactions(session.channel, session.message).catch(() => {});
 }
 
 /**
@@ -412,30 +434,32 @@ async function updateMessageToPlaying(bot: eris.Client, session: AmongUsSession,
         ? `Impostors will be put in a shared voice channel and will be able to communicate during the game. Normal players will not be able to see who the impostors are. ${session.user} can react with <:${GROUPING_TOGGLE_EMOJI}> **after this round is over** to disable this.`
         : `Want an extra challenge? Impostors can be automatically put in the same voice channel to allow them to communicate during the game. This will not reveal to the other players who the impostors are. ${session.user} can react with <:${GROUPING_TOGGLE_EMOJI}> **after this round is over** to enable this.`;
 
-    await bot.editMessage(session.channel, session.message, {
-        embed: {
-            color: WARN,
-            title: `🎲 Among Us - ${session.region} - ${session.lobbyCode} (In Game)`,
-            description: `${session.user} is hosting a game of [Among Us](http://www.innersloth.com/gameAmongUs.php)! Join the voice channel <#${mainChannel.channelId}> or click [here](https://discord.gg/${mainChannel.invite}) to join the voice chat. ~~To join the Among Us lobby, select the **${session.region}** server and enter code \`${session.lobbyCode}\`.~~ The lobby is currently ongoing! You'll need to wait for the round to end before you can join.`,
-            fields: [
-                {
-                    name: "Current Players",
-                    value: formatPlayerText(session, playerData) || "_None_",
+    await bot
+        .editMessage(session.channel, session.message, {
+            embed: {
+                color: WARN,
+                title: `🎲 Among Us - ${session.region} - ${session.lobbyCode} (In Game)`,
+                description: `${session.user} is hosting a game of [Among Us](http://www.innersloth.com/gameAmongUs.php)! Join the voice channel <#${mainChannel.channelId}> or click [here](https://discord.gg/${mainChannel.invite}) to join the voice chat. ~~To join the Among Us lobby, select the **${session.region}** server and enter code \`${session.lobbyCode}\`.~~ The lobby is currently ongoing! You'll need to wait for the round to end before you can join.`,
+                fields: [
+                    {
+                        name: "Current Players",
+                        value: formatPlayerText(session, playerData) || "_None_",
+                    },
+                    {
+                        name: session.groupImpostors
+                            ? GROUPING_ENABLED_EMOJI + " Impostors Are Grouped"
+                            : GROUPING_DISABLED_EMOJI + " Impostors Not Grouped",
+                        value: groupingText,
+                    },
+                ],
+                footer: {
+                    icon_url: bot.user.avatarURL.replace("jpg", "png"),
+                    text:
+                        "Reminder: the bot takes up a player spot! Found that last player? Use the X to have the bot leave.",
                 },
-                {
-                    name: session.groupImpostors
-                        ? GROUPING_ENABLED_EMOJI + " Impostors Are Grouped"
-                        : GROUPING_DISABLED_EMOJI + " Impostors Not Grouped",
-                    value: groupingText,
-                },
-            ],
-            footer: {
-                icon_url: bot.user.avatarURL.replace("jpg", "png"),
-                text:
-                    "Reminder: the bot takes up a player spot! Found that last player? Use the X to have the bot leave.",
             },
-        },
-    });
+        })
+        .catch(() => {});
 }
 
 /**
@@ -451,28 +475,30 @@ async function updateMessageToLobby(bot: eris.Client, session: AmongUsSession, p
         ? `Impostors will be put in a shared voice channel and will be able to communicate during the game. Normal players will not be able to see who the impostors are. ${session.user} can react with <:${GROUPING_TOGGLE_EMOJI}> to disable this.`
         : `Want an extra challenge? Impostors can be automatically put in the same voice channel to allow them to communicate during the game. This will not reveal to the other players who the impostors are. ${session.user} can react with <:${GROUPING_TOGGLE_EMOJI}> to enable this.`;
 
-    await bot.editMessage(session.channel, session.message, {
-        embed: {
-            color: INFO,
-            title: `🎲 Among Us - ${session.region} - ${session.lobbyCode}`,
-            description: `${session.user} is hosting a game of [Among Us](http://www.innersloth.com/gameAmongUs.php)! Join the voice channel <#${mainChannel.channelId}> or click [here](https://discord.gg/${mainChannel.invite}) to join the voice chat. To join the Among Us lobby, select the **${session.region}** server and enter code \`${session.lobbyCode}\`.\n\nReact with your color to associate your Discord with your Among Us character! This will automatically mute you once you die and group you together with the other impostors if enabled.`,
-            fields: [
-                {
-                    name: "Current Players",
-                    value: formatPlayerText(session, playerData) || "_None_",
+    await bot
+        .editMessage(session.channel, session.message, {
+            embed: {
+                color: INFO,
+                title: `🎲 Among Us - ${session.region} - ${session.lobbyCode}`,
+                description: `${session.user} is hosting a game of [Among Us](http://www.innersloth.com/gameAmongUs.php)! Join the voice channel <#${mainChannel.channelId}> or click [here](https://discord.gg/${mainChannel.invite}) to join the voice chat. To join the Among Us lobby, select the **${session.region}** server and enter code \`${session.lobbyCode}\`.\n\nReact with your color to associate your Discord with your Among Us character! This will automatically mute you once you die and group you together with the other impostors if enabled.`,
+                fields: [
+                    {
+                        name: "Current Players",
+                        value: formatPlayerText(session, playerData) || "_None_",
+                    },
+                    {
+                        name: session.groupImpostors
+                            ? GROUPING_ENABLED_EMOJI + " Impostors Are Grouped"
+                            : GROUPING_DISABLED_EMOJI + " Impostors Not Grouped",
+                        value: groupingText,
+                    },
+                ],
+                footer: {
+                    icon_url: bot.user.avatarURL.replace("jpg", "png"),
+                    text:
+                        "Reminder: the bot takes up a player spot! Found that last player? Use the X to have the bot leave.",
                 },
-                {
-                    name: session.groupImpostors
-                        ? GROUPING_ENABLED_EMOJI + " Impostors Are Grouped"
-                        : GROUPING_DISABLED_EMOJI + " Impostors Not Grouped",
-                    value: groupingText,
-                },
-            ],
-            footer: {
-                icon_url: bot.user.avatarURL.replace("jpg", "png"),
-                text:
-                    "Reminder: the bot takes up a player spot! Found that last player? Use the X to have the bot leave.",
             },
-        },
-    });
+        })
+        .catch(() => {});
 }

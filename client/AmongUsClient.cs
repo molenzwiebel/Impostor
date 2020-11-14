@@ -17,7 +17,7 @@ namespace client
     {
         // Represents a handshake of the latest version with name set to "Impostor".
         private static readonly byte[] HANDSHAKE =
-            {0x46, 0xD2, 0x02, 0x03, 0x08, 0x49, 0x6D, 0x70, 0x6F, 0x73, 0x74, 0x6F, 0x72};
+            {0x80, 0xD9, 0x02, 0x03, 0x08, 0x49, 0x6D, 0x70, 0x6F, 0x73, 0x74, 0x6F, 0x72};
 
         // The port to the Among Us matchmaker.
         private const ushort MATCHMAKER_PORT = 22023;
@@ -82,11 +82,11 @@ namespace client
         public async Task Connect(IPAddress address, string lobbyName, ushort port = MATCHMAKER_PORT)
         {
             _address = address;
+            _port = port;
             _lobbyName = lobbyName;
             _lobbyCode = GameCode.GameNameToIntV2(lobbyName);
 
             var (connection, response) = await ConnectToMMAndSend(address, port, JoinGame);
-            _port = (ushort) connection.EndPoint.Port;
 
             _connection = connection;
             _connection.DataReceived += OnMessageReceived;
